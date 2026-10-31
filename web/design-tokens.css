@@ -1,0 +1,128 @@
+/* Design tokens — single source of truth for color, radius, elevation.
+   Light = sky-blue brand (what ThemeToggle actually renders); dark = navy surfaces.
+   Loaded after styles.css so these values win. */
+:root {
+  color-scheme: light;
+  /* Brand */
+  --accent: #036998;
+  --accent-soft: #e0f4ff;
+  --accent-hover: #02547a;
+  --accent-inverse: #ffffff;
+  --accent-solid: #7dd3fc;
+  --accent-solid-hover: #a5e2ff;
+  --accent-solid-text: #123c53;
+  /* Surface */
+  --background: #f0f9ff;
+  --surface: #ffffff;
+  --surface-hover: #f8f9fa;
+  --surface-raised: #edf0f3;
+  --dark: #bae6fd;
+  /* Text */
+  --text: #243746;
+  --text-soft: #303741;
+  --muted: #506779;
+  --on-dark: #16445e;
+  /* Border */
+  --border: #bddff0;
+  --border-soft: #e8ebed;
+  --border-focus: #3981a7;
+  /* Semantic */
+  --danger: #a53232;
+  --danger-soft: #fff0ee;
+  --danger-border: #eac3bd;
+  --success: #126044;
+  --success-soft: #f0fff4;
+  --success-border: #bfe0c8;
+  --warning: #714c16;
+  --warning-soft: #fff2df;
+  --warning-border: #e9cf9f;
+  /* Radius / elevation */
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+  --shadow: 0 20px 80px rgba(19, 44, 48, 0.2);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #7dd3fc;
+  --accent-soft: #203b48;
+  --accent-hover: #bae6fd;
+  --accent-inverse: #123c53;
+  --background: #11151b;
+  --surface: #1a2129;
+  --surface-hover: #222b35;
+  --surface-raised: #26313e;
+  --dark: #141b23;
+  --text: #e0e4e9;
+  --text-soft: #c3cbd3;
+  --muted: #afb7c0;
+  --on-dark: #e0e4e9;
+  --border: #404a55;
+  --border-soft: #343f4b;
+  --border-focus: #92b5e3;
+  --danger: #ffb4ae;
+  --danger-soft: #402a29;
+  --danger-border: #925d57;
+  --success: #a0d997;
+  --success-soft: #1c232c;
+  --success-border: #343f4b;
+  --warning: #f1d398;
+  --warning-soft: #3c3321;
+  --warning-border: #6d5a31;
+  --shadow: 0 20px 80px rgba(0, 0, 0, 0.4);
+}
+
+html, body { background: var(--background); color: var(--text); }
+
+/* Sidebar + login intro sit on --dark; styles.css hardcodes light text there. */
+:is(.sidebar, .login-intro) { background: var(--dark); }
+:is(.brand, .brand-mark, .sidebar nav button, .sidebar-icon, .login-intro p,
+    .login-intro .eyebrow, .intro-footer, .sidebar-label, .sidebar-footer) {
+  color: var(--on-dark);
+}
+.brand-mark { border-color: var(--border-focus); }
+.sidebar nav button:hover { background: var(--accent-soft); border-color: var(--border-focus); }
+.sidebar nav button[aria-current="page"] {
+  background: var(--accent-soft);
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+.sidebar nav button[aria-current="page"] :is(span, .sidebar-icon) { color: var(--text); }
+.workspace .topbar { background: var(--accent-soft); }
+
+/* Primary button follows the accent token in both schemes. */
+.primary { background: var(--accent-solid); border-color: var(--border-focus); color: var(--accent-solid-text); }
+.primary:hover:not(:disabled) { background: var(--accent-solid-hover); border-color: var(--accent-hover); }
+
+/* Selected / highlighted surfaces. */
+:is(.trip-heading, .lookup-box, .selected-row, .selected-row:hover, .cdn-match article, .target-pair) {
+  background: var(--accent-soft);
+}
+.activity { background: var(--dark); color: var(--text); border-color: var(--border); }
+:is(.activity-heading, .activity-heading h2, .activity-heading > span, .log-entry time,
+    .log-entry small, .log-level.info) {
+  color: var(--muted);
+  border-color: var(--border);
+}
+.log-level.ok { color: var(--success); }
+.log-level.err { color: var(--danger); }
+
+/* Every dialog shares one shell; widths stay per-purpose. */
+:is(dialog, .confirm-modal, .relation-modal, .salin-modal, .anomaly-route-modal) {
+  border-radius: var(--radius-lg);
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+:is(dialog, .confirm-modal, .relation-modal, .salin-modal, .anomaly-route-modal)::backdrop {
+  background: rgba(20, 37, 54, 0.53);
+}
+[data-theme="dark"] :is(dialog, .confirm-modal, .relation-modal, .salin-modal, .anomaly-route-modal)::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* Focus ring tracks the theme. */
+:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 3px; }

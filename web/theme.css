@@ -1,0 +1,174 @@
+/* Theme layer: dark-mode component overrides + theme toggle + shared overlays.
+   Light theme comes from styles.css + design-tokens.css. */
+
+[data-theme="dark"] :is(button, input, select, dialog, .panel, .card-actions-options, .combobox-options, .truck-trip, .truck-trip .timeline-marker, .column-details > summary.transaction-icon-button) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+[data-theme="dark"] .workspace .topbar { background: var(--surface); }
+[data-theme="dark"] :is(button:hover:not(:disabled), .column-details > summary:hover) {
+  background: var(--surface-raised);
+  border-color: #7b8c9e;
+}
+[data-theme="dark"] :is(input:disabled, select:disabled, th, .relation-modal th, .trip-heading, .finding-info) {
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+[data-theme="dark"] input::placeholder { color: #a8b0b8; }
+[data-theme="dark"] :is(td, .check-label) { border-color: var(--border); }
+[data-theme="dark"] tbody tr:hover { background: var(--surface-raised); }
+[data-theme="dark"] :is(.selected-row, .selected-row:hover, .cdn-match article, .target-pair) { background: #202b39; }
+[data-theme="dark"] :is(.transaction-times time, .combobox .option, .heading-actions strong, .empty h3) { color: var(--text); }
+[data-theme="dark"] :is(.pc-select, .lookup-box > .mono) { color: var(--accent); }
+[data-theme="dark"] :is(.location-tags span, .small-tag, .status) {
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  border-color: var(--border);
+}
+[data-theme="dark"] .status.online { background: #233142; color: #a1c0e1; }
+[data-theme="dark"] :is(.status.offline, .error, .error-banner, .login-form .error, .deleted-status, .lookup-failed) {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+[data-theme="dark"] :is(.transaction-timeline .deleted-record article, .pair-card.deleted-record, .transaction-results tr.deleted-record, .relation-modal .deleted-record) {
+  background: #352525;
+  border-left-color: #d59389;
+}
+[data-theme="dark"] .transaction-timeline .deleted-record .timeline-marker {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+[data-theme="dark"] .lookup-box { background: #202a35; border-color: var(--border); }
+[data-theme="dark"] .finding-warn { background: var(--warning-soft); color: var(--warning); }
+[data-theme="dark"] .trip-notes { color: var(--warning); }
+[data-theme="dark"] .view-tabs button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: #637487;
+}
+[data-theme="dark"] .combobox .option.active { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-inverse);
+}
+[data-theme="dark"] .primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+[data-theme="dark"] .sidebar nav button[aria-current="page"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-inverse);
+}
+[data-theme="dark"] .sidebar nav button[aria-current="page"] :is(span, .sidebar-icon) { color: var(--accent-inverse); }
+[data-theme="dark"] .cdn-match .timeline-marker { background: #264574; color: #fff; }
+[data-theme="dark"] .truck-trip .timeline-marker { color: var(--stage); border-color: var(--stage); }
+[data-theme="dark"] .activity-stage-0 { --stage: #8ab8f0; }
+[data-theme="dark"] .activity-stage-1 { --stage: #c3a1eb; }
+[data-theme="dark"] .activity-stage-2 { --stage: #7fd6bf; }
+[data-theme="dark"] .activity-stage-3 { --stage: #e7c27a; }
+[data-theme="dark"] .activity-stage-4 { --stage: #efa585; }
+[data-theme="dark"] .activity-stage-5 { --stage: #a0d997; }
+[data-theme="dark"] .activity-stage-6 { --stage: #afb7c0; }
+[data-theme="dark"] :focus-visible { outline-color: var(--border-focus); }
+[data-theme="dark"] dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+
+/* Theme toggle — footprint matches .icon-button in the topbar. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  flex-shrink: 0;
+}
+.topbar-right :is(.theme-toggle, .icon-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  flex: 0 0 36px;
+  border-radius: var(--radius);
+}
+.topbar-right .theme-toggle span { display: none; }
+.login-form { position: relative; }
+.login-form > .theme-toggle { position: absolute; right: 16px; top: 16px; }
+@media (max-width: 700px) { .theme-toggle span { display: none; } }
+
+/* Dismissible notices. */
+.error.dismissible-notice,
+.success.dismissible-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px 4px 13px;
+}
+.dismissible-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+:is(.error, .success).dismissible-notice > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: inherit;
+}
+
+/* Confirm modal — same shell as other dialogs. */
+.confirm-modal {
+  width: min(560px, calc(100vw - 24px));
+  max-height: 85dvh;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+}
+.confirm-modal h2 { font-size: 20px; margin: 0 0 8px; }
+.confirm-modal #confirm-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  border-left: 3px solid var(--accent);
+  padding: 12px;
+  background: var(--accent-soft);
+  margin: 18px 0;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-actions button { min-height: 40px; }
+.confirm-modal::backdrop { background: rgba(20, 37, 54, 0.53); }
+
+/* Busy spinner. */
+:is(button, [role="status"])[aria-busy="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: process-spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+button.transaction-icon-button[aria-busy="true"] > svg { display: none; }
+button.transaction-icon-button[aria-busy="true"]::before { margin: 0; }
+@keyframes process-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  :is(button, [role="status"])[aria-busy="true"]::before { animation: none; }
+}
+@media (max-width: 700px) {
+  .confirm-modal { padding: 16px; }
+  .confirm-actions button { flex: 1; }
+}

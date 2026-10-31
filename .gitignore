@@ -1,0 +1,8 @@
+node_modules/
+dist/
+public/app.js
+public/app.css
+.env
+data/*.json
+data/*.tmp
+*.log
