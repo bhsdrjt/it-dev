@@ -1,6 +1,37 @@
 # IT Dev Ops
 
-Aplikasi internal sesuai `PRD.md`: NestJS 12 + React 19 + TypeScript, SQL Server pusat, registry JSON atomik, serta API equipment checks pada PC target. UI berbahasa Indonesia. Tidak ada mode demo atau data produksi buatan.
+Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi equipment check (flag `isGenerateCDN`) ke banyak PC target di jaringan lokal. Cocok untuk kantor/pusat logistik yang memiliki banyak PC lokasi dengan aplikasi `SNCAutoWBLocalAPI` berjalan di setiap PC.
+
+## Apa itu aplikasi ini
+
+- **Tujuan:** satu layar untuk melihat status seluruh PC target (online/offline, latency), mencari truck, mencari LocationID otomatis, dan mengirim perubahan `isGenerateCDN` ke PC target dalam beberapa klik — tanpa mengedit konfigurasi PC satu per satu secara manual.
+- **Pengguna:** admin dan staf IT Dev Ops. Satu akun bersama (tidak ada multi-user/role saat ini).
+- **Stack:** NestJS 12 + TypeScript (backend), React 19 + TypeScript (frontend SPA, di-bundle esbuild), mssql, axios, ping, jsonwebtoken. Node.js 22.13+.
+- **Arsitektur:** browser SPA berkomunikasi ke backend NestJS di port 3000 via HTTP + JWT. Backend baca data referensi dari SQL Server pusat dan mengirim/ambil data konfigurasi langsung ke API lokal di tiap PC target.
+- **Penyimpanan:** daftar PC target disimpan di file JSON registry (`data/apis.json`, dapat diubah via `APIS_FILE`) dengan tulisan atomik. Equipment dan lokasi dibaca dari SQL Server (`tabEquipment`, `tabLocation`). Konfigurasi check adalah sumber kebenaran di API tiap PC target, bukan di database pusat.
+- **Tidak ada mode demo atau data produksi buatan.** Semua data berasal dari kredensial `.env`, database, dan PC target nyata.
+
+### Alur kerja harian
+
+1. Login dengan akun dari `.env` (token JWT berlaku 12 jam).
+2. Tambah/edit PC target: isi nama PC, IPv4, dan pilih satu atau lebih lokasi DB.
+3. Ping seluruh PC atau PC tertentu untuk melihat status online/offline dan latency.
+4. Pilih truck, lalu cari LocationID otomatis: backend mencoba setiap lokasi terdaftar PC satu per satu. PC offline langsung dihentikan tanpa menunggu timeout.
+5. Setel `isGenerateCDN`, konfirmasi, lalu kirim konfigurasi ke PC target. Muat ulang data PC setelah timeout pengiriman sebelum mencoba kembali.
+
+### Kontrak API PC target
+
+Backend memanggil tiap PC target lewat:
+
+```text
+GET  http://{ip}{API_BASE_PATH}/api/EquipmentChecks
+GET  http://{ip}{API_BASE_PATH}/api/EquipmentChecks?equipmentID={id}&locationID={id}
+POST http://{ip}{API_BASE_PATH}/api/EquipmentChecks/upsert
+```
+
+`API_BASE_PATH` default `/SNCAutoWBLocalAPI`. Lookup mencocokkan `equipmentID` dan `locationID` di sisi server. Payload upsert: `{ equipmentID, locationID, isGenerateCDN }`. Timeout upsert 10 detik.
+
+Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi. Jika API lokal berbeda, sesuaikan `src/pc.ts` dan `src/api.ts`.
 
 ## Menjalankan
 
