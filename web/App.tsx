@@ -8,6 +8,7 @@ import { TruckHistory } from './TruckHistory';
 import { AnomalyDashboard } from './AnomalyDashboard';
 import { CoalCalory } from './CoalCalory';
 import { ThemeToggle } from './ThemeToggle';
+import { LoginBackground } from './LoginBackground';
 import { confirmAction } from './confirm-action';
 import { Icon } from './Icon';
 type Pc = {
@@ -113,21 +114,13 @@ function App() {
     }
   }
   if (!token) return <main className="login-layout">
-    <section className="login-intro">
+    <LoginBackground />
+    <section className="login-card">
       <div className="brand"><span className="brand-mark">IT</span> DEV OPS</div>
-      <div>
-        <p className="eyebrow">KONTROL OPERASIONAL</p>
-        <h1>Satu panel.<br />Seluruh lokasi.</h1>
-        <p>Pantau API target dan kelola konfigurasi equipment check di jaringan lokal.</p>
-      </div>
-      <span className="intro-footer">SQL SERVER / LOCAL API / EQUIPMENT CHECKS</span>
-    </section>
-    <section className="login-form">
+      <h2>Masuk ke workspace</h2>
+      <p>Gunakan akun tim IT Dev Ops.</p>
       <ThemeToggle />
-      <form onSubmit={login}>
-        <span className="section-index">AKSES INTERNAL</span>
-        <h2>Masuk ke workspace</h2>
-        <p>Gunakan akun tim IT Dev Ops.</p>
+      <form onSubmit={login} className="login-form">
         <label>Username<input name="username" autoComplete="username" required maxLength={200} autoFocus /></label>
         <label>Password<input name="password" type="password" autoComplete="current-password" required maxLength={1000} /></label>
         {loginError && <p className="error" role="alert">
