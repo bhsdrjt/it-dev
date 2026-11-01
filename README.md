@@ -96,6 +96,55 @@ Registry dibaca ulang pada setiap operasi, mendukung UTF-8 BOM, dan menolak file
 
 Log aktivitas hanya untuk sesi halaman aktif, bukan audit trail permanen. UI menggunakan status hasil ping terakhir, bukan koneksi real-time. Semua operasi API selain login memakai JWT; aset halaman login harus dapat diakses tanpa JWT.
 
+## Menu aplikasi
+
+Aplikasi menyediakan enam menu utama setelah login:
+
+### Equipment checks (utama)
+
+Kelola daftar PC target dan kirim konfigurasi equipment check (`isGenerateCDN`).
+- Daftar PC dengan IP, status online/offline, latency, dan lokasi yang dilayani. Status adalah hasil pemeriksaan terakhir, bukan real-time.
+- Tombol ping untuk semua PC atau satu PC. Ping berhasil tidak menjamin API HTTP sehat.
+- Pilih truck → lookup LocationID otomatis di PC terpilih. PC offline langsung berhenti tanpa menunggu timeout.
+- Jika konfigurasi belum ada, pilih LocationID dari lokasi terdaftar pada PC, atur Generate SK, lalu kirim konfigurasi.
+- Setelah timeout pengiriman, muat ulang data PC sebelum mencoba kembali.
+
+### Monitoring transaksi
+
+Dasbor ringkasan temuan transaksi lintas SK dan truck.
+- Filter rentang waktu (24 jam / 7 hari / bulan berjalan), truck, CoalDeliveryNumber, tingkat keparahan (kritis/warning), dan kategori (pasangan/lokasi/waktu).
+- Kartu ringkasan, tren anomali per hari, kode temuan tersering, daftar temuan, dan truck paling terdampak.
+- Setiap temuan bisa dibuka ke Analisa transaksi atau Timeline truck untuk verifikasi.
+- **Status pratinjau:** tampilan masih berbentuk contoh dan belum terhubung ke database penuh. Gunakan untuk melihat bentuk tampilan, belum untuk pengambilan keputusan.
+
+### Analisa transaksi
+
+Menu inti untuk memeriksa satu CoalDeliveryNumber (SK) secara mendalam.
+- Masukkan SK, tampilkan kartu Kirim (muat) dan Terima (timbang kosong), aktivitas reader/timbang, dan temuan berlevel info/warn.
+- Aksi yang memerlukan konfirmasi: Salin Muatan, Generate SK Terima, Pasangkan Terima, Lepas Relasi, Cek relasi, Hapus, dan Masukkan ke Terima (RawTerima).
+- Semua aksi mengubah data produksi. Setelah gagal atau timeout, cari ulang untuk melihat hasil sebenarnya; jangan mengulang otomatis.
+- Aturan dan kode temuan lengkap ada di `docs/LOGIC_ANALISA_TRANSAKSI.md`.
+
+### Timeline truck
+
+Riwayat satu truck dalam rentang waktu tertentu.
+- Pilih truck/EquipmentID, isi tanggal dan jam mulai serta selesai.
+- Tab Kirim/Terima (transaksi final) atau Aktivitas truck (pembacaan reader dan timbang).
+- Berguna untuk memeriksa apakah sebuah transaksi punya pasangan di luar SK yang sedang dicari.
+
+### Coal calory
+
+Kelola data kualitas batu bara (`tabCoalQualityAGM`).
+- Lihat daftar kualitas beserta nilai calory, cari berdasarkan ID/CoalQualityID/nama.
+- Edit nama dan nilai calory (boleh dikosongkan).
+- Impor CSV dan Ekspor CSV untuk memperbarui banyak baris sekaligus.
+- Hapus data (soft delete melalui `dtDeletedAt`, bukan permanen) dengan konfirmasi.
+- Perubahan memengaruhi database pusat dan memicu sinkronisasi internal.
+
+### Activity log
+
+Catatan aktivitas selama sesi halaman terbuka di browser: waktu, tingkat (ok/error/info), pesan, dan catatan teknis. Ini bukan riwayat permanen dan hilang saat halaman ditutup/di-refresh.
+
 ## Kontrak API PC yang perlu diverifikasi
 
 PRD tidak menjelaskan endpoint lookup khusus atau contoh respons aplikasi lama. Implementasi memakai:
