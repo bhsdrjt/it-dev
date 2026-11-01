@@ -5,7 +5,7 @@ Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi eq
 ## Apa itu aplikasi ini
 
 - **Tujuan:** satu layar untuk melihat status seluruh PC target (online/offline, latency), mencari truck, mencari LocationID otomatis, dan mengirim perubahan `isGenerateCDN` ke PC target dalam beberapa klik — tanpa mengedit konfigurasi PC satu per satu secara manual.
-- **Pengguna:** admin dan staf IT Dev Ops. Satu akun bersama (tidak ada multi-user/role saat ini).
+- **Pengguna:** akun individual dengan role dan permission per menu/aksi. Autentikasi disimpan di database `ITMonitor`, terpisah dari database produksi pada instance SQL Server yang sama.
 - **Stack:** NestJS 12 + TypeScript (backend), React 19 + TypeScript (frontend SPA, di-bundle esbuild), mssql, axios, ping, jsonwebtoken. Node.js 22.13+.
 - **Arsitektur:** browser SPA berkomunikasi ke backend NestJS di port 3000 via HTTP + JWT. Backend baca data referensi dari SQL Server pusat dan mengirim/ambil data konfigurasi langsung ke API lokal di tiap PC target.
 - **Penyimpanan:** daftar PC target disimpan di file JSON registry (`data/apis.json`, dapat diubah via `APIS_FILE`) dengan tulisan atomik. Equipment dan lokasi dibaca dari SQL Server (`tabEquipment`, `tabLocation`). Konfigurasi check adalah sumber kebenaran di API tiap PC target, bukan di database pusat.
@@ -13,7 +13,7 @@ Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi eq
 
 ### Alur kerja harian
 
-1. Login dengan akun dari `.env` (token JWT berlaku 12 jam).
+1. Login dengan akun dari `ITMonitor` (token JWT berlaku 12 jam; status user dan izin diperiksa setiap request).
 2. Tambah/edit PC target: isi nama PC, IPv4, dan pilih satu atau lebih lokasi DB.
 3. Ping seluruh PC atau PC tertentu untuk melihat status online/offline dan latency.
 4. Pilih truck, lalu cari LocationID otomatis: backend mencoba setiap lokasi terdaftar PC satu per satu. PC offline langsung dihentikan tanpa menunggu timeout.
@@ -37,7 +37,7 @@ Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi. Jika API lok
 
 1. Pasang Node.js **22.13+** (direkomendasikan Node.js 24) dan pastikan utilitas OS `ping` tersedia. Tanpa utilitas tersebut, monitoring memakai fallback TCP port 80.
 2. Dari direktori proyek, jalankan `npm ci`.
-3. Salin `.env.example` menjadi `.env`, lalu isi `AUTH_USERNAME`, `AUTH_PASSWORD`, `DB_SERVER`, `DB_DATABASE`, `DB_USER`, dan `DB_PASSWORD`.
+3. Salin `.env.example` menjadi `.env`. Isi koneksi produksi `DB_SERVER`, `DB_DATABASE`, `DB_USER`, `DB_PASSWORD`, serta koneksi auth `AUTH_DB_DATABASE=ITMonitor`, `AUTH_DB_USER`, dan `AUTH_DB_PASSWORD`. Server, port, dan pengaturan TLS mengikuti koneksi produksi; gunakan login SQL terpisah dengan izin minimum. Database auth wajib berbeda dari database produksi.
 4. Buat `JWT_SECRET` acak dan masukkan hasilnya ke `.env`:
 
    ```powershell
@@ -46,16 +46,39 @@ Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi. Jika API lok
 
 5. Jalankan `npm start`, lalu buka `http://localhost:3000`. Perintah ini membangun backend/UI sebelum menjalankan server. Untuk menjalankan hasil build tanpa membangun ulang: `npm run serve`.
 
-Server menolak startup bila variabel wajib kosong. Kredensial asli tidak disertakan. SQL Server tidak harus online saat startup; kegagalan query ditampilkan sebagai HTTP 503 dan koneksi dicoba kembali pada permintaan berikutnya.
+Server menolak startup bila variabel wajib kosong. Kredensial asli tidak disertakan. SQL Server tidak harus online saat startup; kegagalan query ditampilkan sebagai HTTP 503 dan koneksi dicoba kembali pada permintaan berikutnya. Jika `ITMonitor` tidak tersedia, login dan request terlindungi ditolak dengan 503; tidak ada fallback akun `.env`.
+
+## Setup database autentikasi ITMonitor
+
+1. DBA menjalankan `sql/itmonitor-auth.sql` melalui SSMS pada instance SQL Server yang sama. Script membuat `ITMonitor`, tabel `dbo.Auth*`, role, dan permission; tidak mengubah tabel produksi atau membuat password bawaan.
+2. Buat login SQL khusus dan user di `ITMonitor`. Berikan SELECT/INSERT/UPDATE pada tabel auth yang diperlukan dan DELETE pada tabel relasi role. Untuk `dbo.UserAudit`, berikan SELECT dan INSERT; runtime tidak memerlukan UPDATE/DELETE audit. Jangan berikan `db_owner` atau `sysadmin`.
+3. Isi `AUTH_DB_DATABASE=ITMonitor`, `AUTH_DB_USER`, dan `AUTH_DB_PASSWORD` di `.env`.
+4. Untuk membuat admin pertama, set `BOOTSTRAP_ADMIN_USERNAME` dan `BOOTSTRAP_ADMIN_PASSWORD` sebagai environment sementara. Password minimal 12 karakter. Jalankan:
+
+   ```powershell
+   node --env-file-if-exists=.env sql/provision-admin.cjs
+   ```
+
+5. Hapus environment bootstrap setelah selesai. Script hanya membuat akun baru, tidak mereset akun existing. Jalankan `npm start`, lalu login dengan akun tersebut.
+
+JWT tetap memakai bearer token existing. Izin dan status akun diperiksa ulang dari `ITMonitor` setiap request; perubahan password/role user mencabut token melalui versi autentikasi. Menu dan aksi dibatasi permission, termasuk perbaikan transaksi dan pengiriman konfigurasi PC. Login berhasil, pembacaan endpoint operasional (GET), ping, serta aksi tulis dicatat permanen di `dbo.UserAudit`. Pembacaan admin users/roles ikut dicatat; perubahan admin dan bootstrap diaudit dalam transaksi yang sama. Activity log browser tetap catatan sesi, bukan tampilan audit permanen.
+
+Upgrade instalasi dengan `dbo.AuthAudit`: hentikan aplikasi, backup database, lalu DBA menjalankan `sql/user-audit.sql` sebelum menjalankan backend baru. Script mengganti nama tabel memakai `sp_rename`, mempertahankan data/ID/izin, memperbesar `Target` menjadi `nvarchar(max)`, menambahkan kolom lama yang belum ada, serta indeks actor/waktu dan operation ID. Jika kedua tabel sudah ada, migrasi berhenti tanpa menghapus data; rekonsiliasi manual diperlukan. Constraint outcome hanya ditambahkan jika data lama kompatibel. `sql/itmonitor-auth.sql` juga memuat migrasi yang sama untuk setup baru maupun rerun. Periksa kembali izin SELECT/INSERT runtime pada `dbo.UserAudit`. DBA harus memberi izin baca secara manual pada user SQL yang sama dengan `AUTH_DB_USER`: `USE ITMonitor; GRANT SELECT ON OBJECT::dbo.UserAudit TO [nama_user_runtime];` (ganti placeholder dengan user SQL aktual). Menu UserAudit dan `GET /auth/admin/audit` hanya menerima role `admin`, bukan sekadar permission `access.manage`. Endpoint ini read-only dan tidak menulis audit untuk pembacaan audit sendiri. Parameter: `limit` default 50 (1–100), `offset` 0–1000000, `user` username persis, `outcome`, `start` inklusif / `end` eksklusif dalam UTC `YYYY-MM-DDTHH:mm:ss`; urutan CreatedAt DESC lalu Id DESC. Pagination offset dapat bergeser jika audit baru masuk; muat ulang untuk data terbaru. Migrasi memerlukan akun DBA dengan izin DDL, bukan akun runtime. Server tidak otomatis membuat/mengubah database.
+
+Audit menyimpan ActorUserId, action, target identifier/filter pencarian yang diizinkan, OperationId, outcome, dan waktu UTC. Request operasional mencatat `started` sebelum handler, lalu `succeeded`/`failed`; timeout/error server pada mutasi menjadi `unknown` karena perubahan mungkin sudah diterapkan. Jika audit awal gagal, handler diblokir; jika audit akhir gagal, baris `started` tetap tersedia dan respons 503 meminta pemeriksaan sebelum retry mutasi. Error read/ping menjadi `failed`; sukses ping berarti pemeriksaan selesai, bukan semua PC online. Password, token, header, body utuh, respons, dan SQL tidak disalin ke audit. Tidak mencatat polling `/auth/me`, login gagal, logout lokal, request yang ditolak guard, atau klik menu frontend.
+
+Role awal: `admin`, `it_operator`, `transaction_operator`, `coal_editor`, dan `viewer`. Menu User dan akses tersedia untuk permission `access.manage`. Permission ekspor CSV mengatur tombol ekspor; user yang boleh membaca data tetap dapat menyalin data tersebut.
+
+Database berbeda tidak mengisolasi resource atau downtime instance. Script setup belum otomatis dijalankan oleh aplikasi.
 
 ## Keamanan deployment
 
 - Gunakan HTTPS pada reverse proxy untuk akses browser. HTTP biasa tidak melindungi password maupun token dari penyadapan jaringan.
 - Batasi akses server hanya untuk tim berwenang melalui firewall/VPN. Registry menentukan tujuan request HTTP backend; akun bersama dapat mengubah tujuan tersebut.
 - API PC target memakai HTTP port 80 sesuai PRD. Batasi jalur jaringan antara server dan PC target; jangan mengeksposnya ke internet.
-- Gunakan akun SQL Server dengan izin minimum, bukan administrator: SELECT untuk referensi dan pemeriksaan raw/final, EXECUTE untuk `dbo.usp_GetTruckTimelineByCoalDelivery`, `dbo.usp_SalinMuatan`, `dbo.usp_DataHilang`, `dbo.usp_DebugCTFinalDumpingTonnagebyID`, dan `dbo.sp_UpdateCTFinalDumpingTonnageIDManualByID` (termasuk procedure yang dipanggil di dalamnya melalui ownership chain), UPDATE pada `tabCTFinalLoadingTonnage` untuk aksi Lepas Relasi, SELECT dan UPDATE pada `tabCoalQualityAGM` untuk menu Coal Calory (UPDATE memicu trigger `trg_Sync_CoalQualityAGM_To_Enum_Update` ke `tabEnum`). Replay RawTerima menulis melalui procedure dan trigger; verifikasi izin sesuai ownership chain DB. Semua pengguna aplikasi yang login dapat menjalankan aksi tulis setelah konfirmasi; batasi akses aplikasi ke operator berwenang.
+- Gunakan akun SQL Server dengan izin minimum, bukan administrator: SELECT untuk referensi dan pemeriksaan raw/final, EXECUTE untuk `dbo.usp_GetTruckTimelineByCoalDelivery`, `dbo.usp_SalinMuatan`, `dbo.usp_DataHilang`, `dbo.usp_DebugCTFinalDumpingTonnagebyID`, dan `dbo.sp_UpdateCTFinalDumpingTonnageIDManualByID` (termasuk procedure yang dipanggil di dalamnya melalui ownership chain), UPDATE pada `tabCTFinalLoadingTonnage` untuk aksi Lepas Relasi, SELECT dan UPDATE pada `tabCoalQualityAGM` untuk menu Coal Calory (UPDATE memicu trigger `trg_Sync_CoalQualityAGM_To_Enum_Update` ke `tabEnum`). Replay RawTerima menulis melalui procedure dan trigger; verifikasi izin sesuai ownership chain DB. Aksi tulis membutuhkan permission spesifik selain konfirmasi. Akun SQL auth hanya mengakses database `ITMonitor`; jangan gunakan `sa` atau `db_owner` untuk runtime.
 - `DB_ENCRYPT=true` dan `DB_TRUST_SERVER_CERTIFICATE=false` secara default. Pasang sertifikat SQL Server yang dipercaya. Menonaktifkan validasi sertifikat hanya untuk lingkungan pengujian terisolasi.
-- Lindungi `.env` dan file registry dengan izin filesystem. Token browser disimpan di `sessionStorage`, berlaku 12 jam, dan dibuang saat logout/401. Logout hanya menghapus token lokal; rotasi `JWT_SECRET` membatalkan semua token.
+- Lindungi `.env` dan file registry dengan izin filesystem. Token browser tetap disimpan di `sessionStorage`, berlaku 12 jam, dan dibuang saat logout/401. Logout hanya menghapus token lokal; perubahan password/role user mencabut sesi melalui `TokenVersion`, dan rotasi `JWT_SECRET` membatalkan semua token. Migrasi cookie HttpOnly/CSRF belum termasuk perubahan ini; HTTPS dan mitigasi XSS tetap wajib.
 - Login dibatasi 10 percobaan gagal per IP per 15 menit. Reverse proxy memerlukan pengaturan pembatasan sendiri; aplikasi tidak mempercayai header IP kiriman klien.
 
 ## Konfigurasi
@@ -87,7 +110,7 @@ Registry dibaca ulang pada setiap operasi, mendukung UTF-8 BOM, dan menolak file
 
 ## Alur operator
 
-1. Login menggunakan akun dari `.env`.
+1. Login menggunakan akun individual dari `ITMonitor`.
 2. Tambah PC, isi IPv4, lalu pilih satu atau beberapa lokasi DB.
 3. Ping seluruh PC atau PC tertentu. Online ICMP tidak menjamin layanan API HTTP sehat; request data tetap dapat gagal.
 4. Pilih PC dan truck. Lookup memeriksa TCP terlebih dahulu lalu lokasi PC berurutan. Error koneksi menghentikan loop.

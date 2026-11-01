@@ -26,6 +26,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
     let pairTimesOut = false;
     window.fetch = async (path, options = {}) => {
       calls.push({ path, body: options.body && JSON.parse(options.body) });
+      if (path === '/auth/me') return { ok: true, json: async () => ({ userId: 1, username: 'operator', displayName: 'Operator', permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.restore', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view', 'coal.view', 'coal.update', 'coal.delete', 'coal.import', 'activity.view'] }) };
       if (requestDelay) await new Promise(resolve => setTimeout(resolve, requestDelay));
       if (path.startsWith('/anomalies?')) {
         const query = new URL(path, location.origin).searchParams;
@@ -135,6 +136,10 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       try {
         await tick();
         check(document.querySelector('.workspace'), 'workspace mounted');
+        check(calls.length === 2 && calls[0].path === '/auth/me' && calls[1].path.startsWith('/anomalies?'), 'login fetches only profile and default monitoring menu');
+        check(!document.querySelector('#coal-delivery-number') && !document.querySelector('#history-truck') && !document.querySelector('.coal-calory-panel'), 'unvisited data pages stay unmounted');
+        button('Equipment checks').click(); await tick();
+        check(calls.slice(2).map(row => row.path).sort().join('|') === '/apis|/equipments|/locations', 'first equipment opening loads only its three references');
         const themeToggle = document.querySelector('[aria-label="Mode gelap"]');
         const checkTopbarButtons = () => {
           const themeBox = themeToggle.getBoundingClientRect();
@@ -184,7 +189,9 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(!document.querySelector('.activity-page').hidden && document.querySelector('.equipment-page:not(.activity-page)').hidden, 'activity opens standalone page');
         check(!document.querySelector('.equipment-page:not(.activity-page) .activity') && document.querySelector('.sidebar [aria-current="page"]').textContent.includes('Activity log'), 'global log removed from equipment and available in sidebar');
         check(document.querySelector('[role="log"]').textContent.includes('Lookup') && document.querySelector('.topbar-context').textContent.includes('Activity log'), 'global log retains session entries and page context');
+        const beforeTransactions = calls.length;
         button('Analisa transaksi').click(); await tick();
+        check(calls.length === beforeTransactions, 'transaction opening waits for explicit submit; hidden pages do not fetch');
         check(!document.querySelector('.transactions-page').hidden, 'transaction menu opens');
         check(document.querySelector('.sidebar [aria-current="page"]').textContent.includes('Analisa transaksi'), 'active menu announced');
         const cdn = document.querySelector('#coal-delivery-number');
@@ -455,7 +462,9 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         document.querySelector('.transaction-search').requestSubmit(); await tick();
         check(document.querySelector('.transaction-workspace [role="alert"]').textContent.includes('tidak ditemukan'), 'not found shown');
         check(!document.querySelector('.transaction-results'), 'old results cleared after failure');
+        const beforeHistory = calls.length;
         button('Timeline truck').click(); await tick();
+        check(calls.length === beforeHistory + 1 && calls.at(-1).path === '/equipments?activeOnly=true', 'first history opening loads reference only, not transactions');
         let history = document.querySelector('.truck-history');
         check(calls.some(row => row.path === '/equipments?activeOnly=true') && !history.querySelector('.combobox-options').textContent.includes('DELETED'), 'truck history loads only active equipment');
         check(!history.parentElement.hidden && document.querySelector('.sidebar [aria-current="page"]').textContent.includes('Timeline truck'), 'truck history navigation opens');
@@ -589,7 +598,15 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(escapeModal && escapeModal.querySelector('#confirm-message').textContent.includes('tidak dihapus'), 'custom confirmation retains warning text');
         escapeModal.dispatchEvent(new Event('cancel', { cancelable: true })); await tick();
         check(!document.querySelector('.confirm-modal') && document.activeElement === escapeTrigger && calls.filter(row => row.path === '/apis/one').length === writesBeforeEscape, 'Escape cancels without write and restores focus');
+        check(!calls.some(row => row.path === '/coal-calories'), 'coal data not fetched before menu opens');
+        const beforeCoal = calls.length;
         button('Coal calory').click(); await tick();
+        check(calls.length === beforeCoal + 1 && calls.at(-1).path === '/coal-calories', 'first coal opening loads only coal data');
+        const afterCoal = calls.length;
+        for (const menu of ['Equipment checks', 'Analisa transaksi', 'Timeline truck', 'Monitoring transaksi', 'Activity log', 'Coal calory']) {
+          button(menu).click(); await tick();
+        }
+        check(calls.length === afterCoal, 'revisiting menus preserves mounted state without repeated or hidden fetches');
         const names = () => [...document.querySelectorAll('.coal-calory-panel tbody tr td:nth-child(3)')].map(cell => cell.textContent);
         check(names().join('|') === 'SEAM B|SEAM A|SEAM C', 'coal calory lists rows in fetched order');
         const sortHeader = label => [...document.querySelectorAll('.coal-calory-panel th .sort-header')].find(node => node.textContent.includes(label));

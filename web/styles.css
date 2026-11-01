@@ -14,6 +14,9 @@
 .salin-modal-body{display:flex;flex-direction:column;gap:10px}.salin-modal-body .salin-source{margin:0;padding:8px 10px;background:var(--accent-soft);border-radius:5px;font-size:13px;display:flex;flex-direction:column;gap:2px}.salin-modal-body .salin-source .helper{font-size:12px}.salin-modal-body label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600}.salin-modal-body input{font-family:Consolas,monospace}
 /* Viewport shell: long data scrolls inside panels, never the workspace. */
 [hidden]{display:none!important}
+.workspace main > .menu-page:not([hidden]){animation:menu-enter 180ms ease-out}
+@keyframes menu-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.workspace main > .menu-page:not([hidden]){animation:none}}
 .workspace{height:100dvh;display:grid;grid-template-columns:208px minmax(0,1fr);grid-template-rows:52px minmax(0,1fr);overflow:hidden}
 .sidebar{grid-row:1/-1;background:var(--dark);color:#c3cbd3;padding:24px 16px;display:flex;flex-direction:column;gap:26px;min-height:0;overflow:auto}
 .sidebar .brand{font-size:13px;gap:9px}

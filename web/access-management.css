@@ -1,0 +1,56 @@
+/* Access forms scroll as one page; equipment panels instead shrink to fit a viewport. */
+.access-page {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 3px 6px 6px 3px;
+}
+.access-page > * { flex-shrink: 0; }
+.access-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+}
+.access-card h2 { margin: 0; padding: 14px 16px; overflow-wrap: anywhere; }
+.access-form { padding: 16px; border-top: 1px solid var(--border); }
+.access-form fieldset { display: flex; flex-direction: column; gap: 14px; }
+.access-form legend { color: var(--muted); }
+.access-fields, .access-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px 18px;
+  min-width: 0;
+}
+.access-fields > label { min-width: 0; }
+.access-form button { align-self: flex-start; }
+.access-form .access-option {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 0;
+  line-height: 20px;
+  cursor: pointer;
+}
+.access-option input[type="checkbox"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 1px 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.access-option span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .access-card h2, .access-form { padding: 12px; }
+  .access-fields, .access-options { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,3 +1,6 @@
+import { AccessManagement } from './AccessManagement';
+import { PermissionsContext, pagePermissions } from './permissions';
+import { UserAudit } from './UserAudit';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
@@ -48,7 +51,9 @@ const menuIcons = {
   equipment: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.1-2.1z',
   transactions: 'M4 20V10M10 20V4M16 20v-7M3 20h18',
   anomalies: 'M2 12h4l3-7 4 14 3-7h6',
-  activity: 'M8 3H5v18h14V3h-3M8 2h8v4H8zM8 10h8M8 14h8M8 18h5',
+  activity: 'M3 7V3m0 4h4M3.6 7a9 9 0 1 1-.6 8M12 7v5l3 2',
+  access: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M2 21v-2a6 6 0 0 1 10-4.5M15 16v-2a2 2 0 0 1 4 0v2m-5 0h6v5h-6z',
+  audit: 'M14 21H5V3h10l4 4v5M14 3v5h5M8 11h5M8 15h3M19 16a3 3 0 1 0-6 0 3 3 0 0 0 6 0m-1 2 3 3',
   history: 'M3 16V7a1 1 0 0 1 1-1h9v10H3zm10 0h4l3 3v-3h1a1 1 0 0 0 0-2h-1v-3M6.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
   calory: 'M12 3c1 3 4 4 4 8a4 4 0 0 1-8 0c0-2 1-3 2-4 0 1.5.8 2.2 1.6 2.5C11.2 7.5 11.4 5 12 3z',
 } as const;
@@ -57,6 +62,8 @@ function MenuIcon({ name }: { name: keyof typeof menuIcons }) {
 }
 function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('token') || '');
+  const [profile, setProfile] = useState<{ username: string; displayName?: string; roles?: string[]; permissions: string[] } | null>(null);
+  const [profileError, setProfileError] = useState('');
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loginError, setLoginError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,6 +74,8 @@ function App() {
   const logout = useCallback(() => {
     sessionStorage.removeItem('token');
     setToken('');
+    setProfile(null);
+    setEntries([]);
   }, []);
   // Satu jalur request berautentikasi; HTTP 401 menghapus sesi lokal.
   const api: RequestApi = useCallback(async <T,>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> => {
@@ -92,6 +101,20 @@ function App() {
     }
     return data as T;
   }, [token, logout, log]);
+  useEffect(() => {
+    setProfile(null);
+    setProfileError('');
+    if (!token) return;
+    const controller = new AbortController();
+    api<{ username: string; displayName?: string; roles?: string[]; permissions: string[]; user?: { username: string; displayName?: string; roles?: string[]; permissions: string[] } }>('/auth/me', 'GET', undefined, controller.signal)
+      .then(data => {
+        const user = data.user ?? data;
+        if (!Array.isArray(user.permissions) || !user.permissions.every(code => typeof code === 'string')) throw new Error('Profil izin tidak valid.');
+        if (user.roles !== undefined && (!Array.isArray(user.roles) || !user.roles.every(role => typeof role === 'string'))) throw new Error('Profil role tidak valid.');
+        if (!controller.signal.aborted) setProfile(user);
+      }).catch(error => { if (!controller.signal.aborted) setProfileError(message(error)); });
+    return () => controller.abort();
+  }, [token, api]);
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -118,7 +141,7 @@ function App() {
     <section className="login-card">
       <div className="brand"><span className="brand-mark">IT</span> DEV OPS</div>
       <h2>Masuk ke workspace</h2>
-      <p>Gunakan akun tim IT Dev Ops.</p>
+      <p>Gunakan akun individual IT Dev Ops.</p>
       <ThemeToggle />
       <form onSubmit={login} className="login-form">
         <label>Username<input name="username" autoComplete="username" required maxLength={200} autoFocus /></label>
@@ -133,18 +156,34 @@ function App() {
       </form>
     </section>
   </main>;
-  return <Dashboard api={api} log={log} entries={entries} logout={() => {
+  if (!profile) return <main className="login-layout"><section className="login-card"><p role="status">{profileError || 'Memuat izin akses…'}</p><button onClick={logout}>Kembali ke login</button></section></main>;
+  return <PermissionsContext.Provider value={profile.permissions}><Dashboard roles={profile.roles ?? []} permissions={profile.permissions} api={api} log={log} entries={entries} logout={() => {
     log('info', 'Logout.');
     logout();
-  }} />;
+  }} /></PermissionsContext.Provider>;
 }
-function Dashboard({ api, log, entries, logout }: {
+function Dashboard({ api, log, entries, logout, permissions, roles }: {
+  roles: string[];
+  permissions: string[];
   api: RequestApi;
   log: (level: Entry['level'], message: string, note?: string) => void;
   entries: Entry[];
   logout: () => void
 }) {
-  const [page, setPage] = useState<'equipment' | 'transactions' | 'anomalies' | 'truck-history' | 'coal-calory' | 'activity'>('anomalies');
+  const can = (code: string) => permissions.includes(code);
+  const hasPcActions = can('equipment.ping') || can('equipment.manage_pc');
+  const isAdmin = roles.includes('admin');
+  type Page = keyof typeof pagePermissions | 'audit';
+  const firstPage: Page | undefined = (Object.keys(pagePermissions) as (keyof typeof pagePermissions)[]).find(key => can(pagePermissions[key])) ?? (isAdmin ? 'audit' : undefined);
+  const [page, updatePage] = useState<Page>(firstPage ?? 'activity');
+  // Keep visited pages mounted so drafts/results survive navigation; unopened pages do no work.
+  const [visited, setVisited] = useState(() => new Set<Page>(firstPage ? [firstPage] : []));
+  const setPage = (next: Page) => {
+    if (!(next === 'audit' ? isAdmin : can(pagePermissions[next]))) return;
+    setVisited(old => old.has(next) ? old : new Set([...old, next]));
+    updatePage(next);
+  };
+  const equipmentVisited = visited.has('equipment');
   const [transactionCdn, setTransactionCdn] = useState('');
   const [truckTarget, setTruckTarget] = useState<{ equipmentId: number; date: string; cdn: string | null; truck: string | null; eventAt: string } | null>(null);
   const [pcs, setPcs] = useState<Pc[]>([]);
@@ -206,10 +245,12 @@ function Dashboard({ api, log, entries, logout }: {
     log('ok', 'Referensi lokasi dimuat dari database pusat.');
   }), [api, log, run]);
   useEffect(() => {
-    void loadPcs();
-    void loadEquipment();
-    void loadLocations();
-  }, [loadPcs, loadEquipment, loadLocations]);
+    if (equipmentVisited && permissions.includes('equipment.view')) {
+      void loadPcs();
+      void loadEquipment();
+      void loadLocations();
+    }
+  }, [equipmentVisited, loadPcs, loadEquipment, loadLocations, permissions]);
   useEffect(() => {
     const panel = logEnd.current?.parentElement;
     if (panel) panel.scrollTop = panel.scrollHeight;
@@ -305,23 +346,25 @@ function Dashboard({ api, log, entries, logout }: {
     });
   }
   const pcRows = pcs.filter(pc => `${pc.apiName} ${pc.ipAPI} ${pc.locationIDs.map(id => `${id} ${locations.find(l => l.LocationID === id)?.strLocationName || ''}`).join(' ')}`.toLowerCase().includes(pcSearch.toLowerCase()));
-  const pageLabel = { equipment: 'Equipment checks', transactions: 'Analisa transaksi', anomalies: 'Monitoring transaksi', 'truck-history': 'Timeline truck', 'coal-calory': 'Coal calory', activity: 'Activity log' } as const;
+  const pageLabel = { equipment: 'Equipment checks', transactions: 'Analisa transaksi', anomalies: 'Monitoring transaksi', 'truck-history': 'Timeline truck', 'coal-calory': 'Coal calory', activity: 'Activity log', access: 'Manajemen akses', audit: 'User Audit' } as const;
   return <div className="workspace">
     <aside className="sidebar">
-      <a className="brand" href="#workspace" onClick={() => setPage('equipment')}><span className="brand-mark">IT</span> DEV OPS</a>
-      <span className="sidebar-label">WORKSPACE</span>
-      <nav aria-label="Menu utama">
-        <button aria-current={page === 'anomalies' ? 'page' : undefined} onClick={() => setPage('anomalies')}><MenuIcon name="anomalies" /> Monitoring transaksi</button>
-        <button aria-current={page === 'equipment' ? 'page' : undefined} onClick={() => setPage('equipment')}><MenuIcon name="equipment" /> Equipment checks</button>
-        <button aria-current={page === 'transactions' ? 'page' : undefined} onClick={() => setPage('transactions')}><MenuIcon name="transactions" /> Analisa transaksi</button>
-        <button aria-current={page === 'truck-history' ? 'page' : undefined} onClick={() => setPage('truck-history')}><MenuIcon name="history" /> Timeline truck</button>
-        <button aria-current={page === 'coal-calory' ? 'page' : undefined} onClick={() => setPage('coal-calory')}><MenuIcon name="calory" /> Coal calory</button>
-        <button aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
+      <a className="brand" href="#workspace" onClick={() => firstPage && setPage(firstPage)}><span className="brand-mark">IT</span> DEV OPS</a>
+      <span className="sidebar-label" hidden={!firstPage}>WORKSPACE</span>
+      <nav aria-label="Menu utama" hidden={!firstPage}>
+        <button hidden={!can('monitoring.view')} aria-current={page === 'anomalies' ? 'page' : undefined} onClick={() => setPage('anomalies')}><MenuIcon name="anomalies" /> Monitoring transaksi</button>
+        <button hidden={!can('equipment.view')} aria-current={page === 'equipment' ? 'page' : undefined} onClick={() => setPage('equipment')}><MenuIcon name="equipment" /> Equipment checks</button>
+        <button hidden={!can('transactions.view')} aria-current={page === 'transactions' ? 'page' : undefined} onClick={() => setPage('transactions')}><MenuIcon name="transactions" /> Analisa transaksi</button>
+        <button hidden={!can('timeline.view')} aria-current={page === 'truck-history' ? 'page' : undefined} onClick={() => setPage('truck-history')}><MenuIcon name="history" /> Timeline truck</button>
+        <button hidden={!can('coal.view')} aria-current={page === 'coal-calory' ? 'page' : undefined} onClick={() => setPage('coal-calory')}><MenuIcon name="calory" /> Coal calory</button>
+        <button hidden={!can('activity.view')} aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
+        {can('access.manage') && <button aria-current={page === 'access' ? 'page' : undefined} onClick={() => setPage('access')}><MenuIcon name="access" /> Manajemen akses</button>}
+        {isAdmin && <button aria-current={page === 'audit' ? 'page' : undefined} onClick={() => setPage('audit')}><MenuIcon name="audit" /> User Audit</button>}
       </nav>
       <span className="sidebar-footer">INTERNAL OPERATIONS<br />IT Dev Ops · v1.0</span>
     </aside>
     <header className="topbar">
-      <span className="topbar-context">{pageLabel[page]} <span>/</span> Control workspace</span>
+      <span className="topbar-context">{firstPage ? pageLabel[page] : 'Akses workspace'} <span>/</span> Control workspace</span>
       <div className="topbar-right">
         <ThemeToggle />
         <button className="icon-button" aria-label="Keluar" title="Keluar" onClick={logout} disabled={busy.send || busy.mutation}>
@@ -330,7 +373,8 @@ function Dashboard({ api, log, entries, logout }: {
       </div>
     </header>
     <main id="workspace">
-      <div className="equipment-page" hidden={page !== 'equipment'}>
+      {!firstPage && <p role="status">Belum ada izin menu. Hubungi administrator.</p>}
+      {equipmentVisited && can('equipment.view') && <div className="equipment-page menu-page" hidden={page !== 'equipment'}>
         <div className="page-heading">
           <div>
             <p className="eyebrow">WORKSPACE OPERASIONAL</p>
@@ -340,7 +384,7 @@ function Dashboard({ api, log, entries, logout }: {
             <span className="muted">Pemeriksaan terakhir <strong className="mono">
               {lastPing}
             </strong></span>
-            <button className="icon-button" title="Ping seluruh API" aria-label="Ping seluruh API" aria-busy={!!busy.ping} onClick={() => void pingAll()} disabled={busy.ping || busy.pcs || busy.mutation || !pcs.length}><Icon name="ping" /></button>
+            <button className="icon-button" hidden={!can('equipment.ping')} title="Ping seluruh API" aria-label="Ping seluruh API" aria-busy={!!busy.ping} onClick={() => void pingAll()} disabled={busy.ping || busy.pcs || busy.mutation || !pcs.length}><Icon name="ping" /></button>
           </div>
         </div>
         <section className="summary" aria-label="Ringkasan registry">
@@ -384,7 +428,7 @@ function Dashboard({ api, log, entries, logout }: {
                     {pcs.length}
                   </span></h2>
                 </div>
-                <button className="primary icon-button" title="Tambah API" aria-label="Tambah API" onClick={() => {
+                <button className="primary icon-button" hidden={!can('equipment.manage_pc')} title="Tambah API" aria-label="Tambah API" onClick={() => {
                   setEditor('new');
                   log('info', 'Membuka formulir tambah API.');
                 }} disabled={busy.mutation || busy.pcs || busy.ping}><Icon name="plus" /></button>
@@ -403,7 +447,7 @@ function Dashboard({ api, log, entries, logout }: {
                       <th>API / Alamat IP</th>
                       <th>Status</th>
                       <th>Lokasi</th>
-                      <th>
+                      <th hidden={!hasPcActions}>
                         <span className="sr-only">Aksi</span>
                       </th>
                     </tr>
@@ -435,14 +479,14 @@ function Dashboard({ api, log, entries, logout }: {
                           {!pc.locationIDs.length && <span>Belum diatur</span>}
                         </div>
                       </td>
-                      <td>
+                      <td hidden={!hasPcActions}>
                         <div className="row-actions">
-                          <button className="transaction-icon-button" title={`Ping ${pc.apiName}`} aria-busy={!!busy.ping} onClick={() => void pingAll(pc)} disabled={busy.ping || busy.pcs || busy.mutation} aria-label={`Ping ${pc.apiName}`}><Icon name="ping" /></button>
-                          <button className="transaction-icon-button" title={`Edit ${pc.apiName}`} onClick={() => {
+                          <button className="transaction-icon-button" hidden={!can('equipment.ping')} title={`Ping ${pc.apiName}`} aria-busy={!!busy.ping} onClick={() => void pingAll(pc)} disabled={busy.ping || busy.pcs || busy.mutation} aria-label={`Ping ${pc.apiName}`}><Icon name="ping" /></button>
+                          <button className="transaction-icon-button" hidden={!can('equipment.manage_pc')} title={`Edit ${pc.apiName}`} onClick={() => {
                             setEditor(pc);
                             log('info', `Edit ${pcLabel(pc)}.`);
                           }} disabled={busy.mutation || busy.send || busy.pcs || busy.ping} aria-label={`Edit ${pc.apiName}`}><Icon name="edit" /></button>
-                          <button className="transaction-icon-button danger-text" title={`Hapus ${pc.apiName}`} onClick={() => void removePc(pc)} disabled={busy.mutation || busy.send || busy.pcs || busy.ping} aria-label={`Hapus ${pc.apiName}`}><Icon name="trash" /></button>
+                          <button className="transaction-icon-button danger-text" hidden={!can('equipment.manage_pc')} title={`Hapus ${pc.apiName}`} onClick={() => void removePc(pc)} disabled={busy.mutation || busy.send || busy.pcs || busy.ping} aria-label={`Hapus ${pc.apiName}`}><Icon name="trash" /></button>
                         </div>
                       </td>
                     </tr>)}
@@ -509,7 +553,7 @@ function Dashboard({ api, log, entries, logout }: {
                 {errors.send && <p className="error" role="alert">
                   {errors.send}
                 </p>}
-                <button className="primary wide" aria-busy={!!busy.send} onClick={() => void send()} disabled={!selected || !equipmentId || locationId === '' || !allowed.includes(Number(locationId)) || !lookup || lookupBusy || !!lookupError || busy.send || busy.mutation || !!errors.equipment || !!errors.locations}>
+                <button hidden={!can('equipment.configure')} className="primary wide" aria-busy={!!busy.send} onClick={() => void send()} disabled={!selected || !equipmentId || locationId === '' || !allowed.includes(Number(locationId)) || !lookup || lookupBusy || !!lookupError || busy.send || busy.mutation || !!errors.equipment || !!errors.locations}>
                   {busy.send ? 'Mengirim konfigurasi…' : 'Kirim konfigurasi'}
                 </button>
                 <p className="footnote">Perubahan ditulis langsung ke API target.</p>
@@ -517,8 +561,8 @@ function Dashboard({ api, log, entries, logout }: {
             </section>
           </div>
         </div>
-      </div>
-      <section className="equipment-page activity-page" hidden={page !== 'activity'} aria-labelledby="activity-title">
+      </div>}
+      <section className="equipment-page activity-page menu-page" hidden={page !== 'activity' || !can('activity.view')} aria-labelledby="activity-title">
         <div className="page-heading"><div><p className="eyebrow">JEJAK SESI</p><h1 id="activity-title">Activity log</h1><p>Aktivitas lintas menu selama sesi ini.</p></div></div>
         <section className="activity">
           <div className="activity-heading"><h2>Catatan sesi <span className="count">{entries.length}</span></h2><span>SESI INI · WAKTU LOKAL</span></div>
@@ -532,24 +576,26 @@ function Dashboard({ api, log, entries, logout }: {
           <footer>Log hanya tersimpan selama halaman terbuka. Bukan audit trail permanen.</footer>
         </section>
       </section>
-      <section className="anomaly-view" hidden={page !== 'anomalies'} aria-labelledby="anomalies-title">
-        <AnomalyDashboard api={api} onOpenTransaction={selectedCdn => {
+      <section className="anomaly-view menu-page" hidden={page !== 'anomalies' || !can('monitoring.view')} aria-labelledby="anomalies-title">
+        {visited.has('anomalies') && can('monitoring.view') && <AnomalyDashboard api={api} onOpenTransaction={selectedCdn => {
           setTransactionCdn(selectedCdn);
           setPage('transactions');
         }} onOpenTruckHistory={target => {
           setTruckTarget(target);
           setPage('truck-history');
-        }} />
+        }} />}
       </section>
-      <section className="transactions-page" hidden={page !== 'transactions'} aria-labelledby="transactions-title">
-        <Transactions api={api} log={log} initialCdn={transactionCdn} />
+      <section className="transactions-page menu-page" hidden={page !== 'transactions' || !can('transactions.view')} aria-labelledby="transactions-title">
+        {visited.has('transactions') && can('transactions.view') && <Transactions api={api} log={log} initialCdn={transactionCdn} />}
       </section>
-      <section className="transactions-page" hidden={page !== 'truck-history'} aria-labelledby="truck-history-title">
-        <TruckHistory api={api} initialTarget={truckTarget} />
+      <section className="transactions-page menu-page" hidden={page !== 'truck-history' || !can('timeline.view')} aria-labelledby="truck-history-title">
+        {visited.has('truck-history') && can('timeline.view') && <TruckHistory api={api} initialTarget={truckTarget} />}
       </section>
-      <section className="equipment-page" hidden={page !== 'coal-calory'} aria-labelledby="coal-calory-title">
-        <CoalCalory api={api} log={log} />
+      <section className="equipment-page menu-page" hidden={page !== 'coal-calory' || !can('coal.view')} aria-labelledby="coal-calory-title">
+        {visited.has('coal-calory') && can('coal.view') && <CoalCalory api={api} log={log} />}
       </section>
+      {page === 'access' && can('access.manage') && <AccessManagement api={api} />}
+      {page === 'audit' && isAdmin && <UserAudit api={api} />}
     </main>
     {editor && <PcEditor pc={editor} locations={locations} disabled={!!errors.locations || busy.locations} api={api} log={log} close={() => setEditor(null)} saved={pc => {
       setPcs(old => old.some(row => row.id === pc.id) ? old.map(row => row.id === pc.id ? pc : row) : [...old, pc]);

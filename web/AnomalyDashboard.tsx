@@ -1,3 +1,4 @@
+import { usePermissions } from './permissions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
 
@@ -56,6 +57,7 @@ function RouteDialog({ row, close, openTransaction, openTruckHistory }: {
   openTransaction: (cdn: string) => void;
   openTruckHistory: (target: { equipmentId: number; date: string; cdn: string | null; truck: string | null; eventAt: string }) => void;
 }) {
+  const can = usePermissions();
   const dialog = useRef<HTMLDialogElement>(null);
   const date = row.eventAt.slice(0, 10);
   useEffect(() => {
@@ -76,12 +78,12 @@ function RouteDialog({ row, close, openTransaction, openTruckHistory }: {
       <p className="anomaly-route-target">SK <strong className="mono">{row.cdn ?? '—'}</strong> · Truck <strong className="mono">{row.truck ?? '—'}</strong></p>
       <p className="helper">Analisa transaksi memakai SK; Timeline truck memakai truck, dengan rentang 3 jam sebelum dan 3 jam setelah waktu temuan. Tekan tombol muat pada halaman tujuan untuk menampilkan data.</p>
       <div className="anomaly-route-actions">
-        <button type="button" className="primary anomaly-route-transaction" disabled={!row.cdn} onClick={() => {
+        <button type="button" hidden={!can('transactions.view')} className="primary anomaly-route-transaction" disabled={!row.cdn} onClick={() => {
           if (!row.cdn) return;
           close();
           openTransaction(row.cdn);
         }}>Analisa transaksi</button>
-        <button type="button" className="anomaly-route-timeline" disabled={!row.equipmentId} onClick={() => {
+        <button type="button" hidden={!can('timeline.view')} className="anomaly-route-timeline" disabled={!row.equipmentId} onClick={() => {
           if (!row.equipmentId) return;
           close();
           openTruckHistory({ equipmentId: row.equipmentId, date, cdn: row.cdn, truck: row.truck, eventAt: row.eventAt });
@@ -92,6 +94,8 @@ function RouteDialog({ row, close, openTransaction, openTruckHistory }: {
 }
 
 export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }: Props) {
+  const can = usePermissions();
+  const hasRoutes = can('transactions.view') || can('timeline.view');
   const [now, setNow] = useState(() => Date.now());
   const [range, setRange] = useState<Range>('7d');
   const [truck, setTruck] = useState('');
@@ -340,7 +344,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
         <section className="panel anomaly-panel anomaly-table-panel" aria-labelledby="anomaly-table-title">
           <div className="panel-heading">
             <div><span className="section-index">DAFTAR TEMUAN</span><h2 id="anomaly-table-title">Anomali <span className="count">{filtered.length}</span></h2></div>
-            <span className="helper">Buka analisa untuk memeriksa bukti</span>
+            <span className="helper" hidden={!hasRoutes}>Buka analisa untuk memeriksa bukti</span>
           </div>
           {filtered.length ? <div className="table-scroll">
             <table className="anomaly-table">
@@ -351,7 +355,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
                   <th scope="col">SK</th>
                   <th scope="col">Truck</th>
                   <th scope="col">Waktu</th>
-                  <th scope="col"><span className="sr-only">Aksi</span></th>
+                  <th scope="col" hidden={!hasRoutes}><span className="sr-only">Aksi</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -365,7 +369,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
                   <td><span className="mono">{row.cdn ?? '—'}</span></td>
                   <td><span className="mono">{row.truck ?? '—'}</span>{row.equipmentId !== null && <span className="anomaly-sub">#{row.equipmentId}</span>}</td>
                   <td><span className="anomaly-time">{formatEvent(row.eventAt)}</span></td>
-                  <td><button type="button" className="anomaly-open" title="Buka analisa" aria-label="Buka analisa" disabled={!row.cdn && !row.equipmentId} onClick={() => setRouteRow(row)}><Icon name="open" /></button></td>
+                  <td hidden={!hasRoutes}><button type="button" className="anomaly-open" title="Buka analisa" aria-label="Buka analisa" hidden={!(can('transactions.view') && row.cdn) && !(can('timeline.view') && row.equipmentId)} onClick={() => setRouteRow(row)}><Icon name="open" /></button></td>
                 </tr>)}
               </tbody>
             </table>

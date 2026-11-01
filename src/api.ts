@@ -1,11 +1,12 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Put, Query, ServiceUnavailableException, UseGuards } from '@nestjs/common';
-import { JwtGuard } from './auth';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Put, Query, ServiceUnavailableException, UseGuards, UseInterceptors } from '@nestjs/common';
+import { AuthAuditInterceptor, JwtGuard, RequirePermissions } from './auth';
 import { DbService } from './db';
 import { PcService } from './pc';
 import { PcRegistryService } from './registry';
 import { integer, object, pcInput, queryInteger, sqlDateTime, text } from './validation';
 @Controller()
 @UseGuards(JwtGuard)
+@UseInterceptors(AuthAuditInterceptor)
 export class ApiController {
   constructor(private readonly registry: PcRegistryService, private readonly pc: PcService, private readonly db: DbService) { }
   private async reference<T>(label: string, read: () => Promise<T>): Promise<T> {
@@ -17,9 +18,11 @@ export class ApiController {
       throw error;
     }
   }
+  @RequirePermissions('equipment.view')
   @Get('apis') async apis() {
     return Promise.all((await this.registry.list()).map(pc => this.pc.status(pc)));
   }
+  @RequirePermissions('equipment.ping')
   @Post('apis/ping') async ping(@Body() body: unknown) {
     const data = object(body ?? {});
     const pcs = data.apiId === undefined ? await this.registry.list() : [await this.registry.get(text(data.apiId, 'ID API'))];
@@ -32,19 +35,24 @@ export class ApiController {
     if (invalid.length) throw new BadRequestException(`API ${data.apiName} (${data.ipAPI}): LocationID ${invalid.join(', ')} tidak terdaftar sebagai lokasi aktif type 7.`);
     return data;
   }
+  @RequirePermissions('equipment.manage_pc')
   @Post('apis') async add(@Body() body: unknown) {
     return this.registry.save(await this.validatePc(body));
   }
+  @RequirePermissions('equipment.manage_pc')
   @Put('apis/:id') async edit(@Param('id') id: string, @Body() body: unknown) {
     return this.registry.save(await this.validatePc(body), id);
   }
+  @RequirePermissions('equipment.manage_pc')
   @Delete('apis/:id') remove(@Param('id') id: string) {
     return this.registry.remove(id);
   }
+  @RequirePermissions('equipment.view', 'monitoring.view', 'transactions.view', 'timeline.view')
   @Get('equipments') equipments(@Query('activeOnly') activeOnly?: unknown) {
     if (activeOnly !== undefined && activeOnly !== 'true' && activeOnly !== 'false') throw new BadRequestException('activeOnly harus true atau false.');
     return this.db.equipments(activeOnly === 'true');
   }
+  @RequirePermissions('transactions.copy_loading')
   @Post('transactions/salin-muatan')
   salinMuatan(@Body() body: unknown) {
     const data = object(body);
@@ -54,6 +62,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi Salin Muatan diperlukan.');
     return this.db.salinMuatan(cdn, truck);
   }
+  @RequirePermissions('transactions.copy_loading')
   @Get('transactions/salin-muatan/candidates')
   salinMuatanCandidates(@Query('coalDeliveryNumber') coalDeliveryNumber: unknown, @Query('nextDT') nextDT: unknown) {
     const cdn = text(coalDeliveryNumber, 'CoalDeliveryNumber');
@@ -61,6 +70,7 @@ export class ApiController {
     if (!/^[\x20-\x7E]{1,20}$/.test(cdn) || !/^[\x20-\x7E]{1,8}$/.test(truck)) throw new BadRequestException('SK maksimal 20 dan NoTruck maksimal 8 karakter ASCII tanpa karakter kontrol.');
     return this.db.salinMuatanCandidates(cdn, truck);
   }
+  @RequirePermissions('transactions.copy_loading')
   @Post('transactions/salin-muatan/ke-terima-ada')
   salinMuatanKeTerimaAda(@Body() body: unknown) {
     const data = object(body);
@@ -72,6 +82,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi Salin Muatan diperlukan.');
     return this.db.salinMuatanKeTerimaAda(cdn, truck, id);
   }
+  @RequirePermissions('transactions.generate_receipt')
   @Post('transactions/generate-sk-terima')
   generateSkTerima(@Body() body: unknown) {
     const data = object(body);
@@ -80,6 +91,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi Generate SK Terima diperlukan.');
     return this.db.generateSkTerima(cdn);
   }
+  @RequirePermissions('transactions.delete')
   @Post('transactions/delete')
   deleteTransaction(@Body() body: unknown) {
     const data = object(body);
@@ -89,6 +101,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi penghapusan diperlukan.');
     return this.db.deleteTransaction(data.kind, id);
   }
+  @RequirePermissions('transactions.restore')
   @Post('transactions/restore')
   restoreTransaction(@Body() body: unknown) {
     const data = object(body);
@@ -98,6 +111,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi pemulihan diperlukan.');
     return this.db.restoreTransaction(data.kind, id);
   }
+  @RequirePermissions('monitoring.view')
   @Get('anomalies')
   anomalies(@Query('start') start: unknown, @Query('end') end: unknown, @Query('code') code: unknown, @Query('truck') truck: unknown, @Query('cdn') cdn: unknown, @Query('severity') severity: unknown, @Query('category') category: unknown) {
     const from = sqlDateTime(start, 'start');
@@ -111,11 +125,19 @@ export class ApiController {
       severity: optional(severity, 'severity', 10), category: optional(category, 'category', 20)
     });
   }
+  @RequirePermissions('equipment.view', 'monitoring.view', 'transactions.view', 'timeline.view')
   @Get('locations') locations() {
     return this.db.locations();
-  }  @Get('coal-calories') coalCalories() {
+  }
+  @RequirePermissions('coal.view')
+  @Get('coal-calories') coalCalories() {
     return this.db.coalCalories();
   }
+  @RequirePermissions('coal.import')
+  @Put('coal-calories/:id/import') importCoalCalory(@Param('id') id: string, @Body() body: unknown) {
+    return this.updateCoalCalory(id, body);
+  }
+  @RequirePermissions('coal.update')
   @Put('coal-calories/:id') updateCoalCalory(@Param('id') id: string, @Body() body: unknown) {
     const rowId = queryInteger(id, 'CoalQualityAGMID');
     if (rowId <= 0) throw new BadRequestException('CoalQualityAGMID harus integer positif.');
@@ -126,12 +148,14 @@ export class ApiController {
     const calory = data.coalcalory === null ? null : integer(data.coalcalory, 'Coalcalory');
     return this.db.updateCoalCalory(rowId, name, calory);
   }
+  @RequirePermissions('coal.delete')
   @Delete('coal-calories/:id') deleteCoalCalory(@Param('id') id: string, @Body() body: unknown) {
     const rowId = queryInteger(id, 'CoalQualityAGMID');
     if (rowId <= 0) throw new BadRequestException('CoalQualityAGMID harus integer positif.');
     if (object(body ?? {}).confirmed !== true) throw new BadRequestException('Konfirmasi penghapusan diperlukan.');
     return this.db.deleteTransaction('CoalCalory', rowId);
   }
+  @RequirePermissions('timeline.view')
   @Get('transactions/truck-history')
   truckHistory(@Query('equipmentId') equipmentId: unknown, @Query('starttime') starttime: unknown, @Query('endtime') endtime: unknown) {
     const id = queryInteger(equipmentId, 'EquipmentID');
@@ -142,12 +166,14 @@ export class ApiController {
     return this.db.truckHistory(id, start, end);
   }
   // Timeline dibaca; replay RawTerima hanya melalui POST terkonfirmasi.
+  @RequirePermissions('transactions.view', 'timeline.view')
   @Get('transactions/timeline')
   timeline(@Query('coalDeliveryNumber') value: unknown) {
     const coalDeliveryNumber = text(value, 'CoalDeliveryNumber');
     if (coalDeliveryNumber.length > 50 || !/^[\x20-\x7E]+$/.test(coalDeliveryNumber)) throw new BadRequestException('CoalDeliveryNumber harus teks ASCII tanpa karakter kontrol (maksimal 50 karakter).');
     return this.db.truckTimeline(coalDeliveryNumber);
   }
+  @RequirePermissions('transactions.view', 'timeline.view')
   @Get('transactions/relations')
   relatedTransactions(@Query('kind') kind: unknown, @Query('dumpingTonnageId') value: unknown) {
     if (kind !== 'Kirim' && kind !== 'Terima') throw new BadRequestException('Jenis transaksi harus Kirim atau Terima.');
@@ -155,6 +181,7 @@ export class ApiController {
     if (id <= 0) throw new BadRequestException('CTFinalDumpingTonnageID harus integer positif.');
     return this.db.relatedTransactions(kind, id);
   }
+  @RequirePermissions('transactions.pair')
   @Post('transactions/relations/pair')
   pairRelation(@Body() body: unknown) {
     const data = object(body);
@@ -163,6 +190,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi pemasangan relasi diperlukan.');
     return this.db.pairLoadingRelation(loadingTonnageId);
   }
+  @RequirePermissions('transactions.unpair')
   @Post('transactions/relations')
   releaseRelation(@Body() body: unknown) {
     const data = object(body);
@@ -171,6 +199,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi pelepasan relasi diperlukan.');
     return this.db.releaseLoadingRelation(loadingTonnageId);
   }
+  @RequirePermissions('transactions.replay_raw')
   @Post('transactions/raw-terima')
   promoteRawDumping(@Body() body: unknown) {
     const data = object(body);
@@ -179,6 +208,7 @@ export class ApiController {
     if (data.confirmed !== true) throw new BadRequestException('Konfirmasi pemrosesan RawTerima diperlukan.');
     return this.db.promoteRawDumping(rawTonnageId);
   }
+  @RequirePermissions('equipment.view')
   @Get('equipment-checks') async checks(@Query('apiId') apiId: unknown) {
     const pc = await this.registry.get(text(apiId, 'ID API'));
     if (!(await this.pc.status(pc)).online) throw new ServiceUnavailableException(`${this.pc.label(pc)} offline. Data tidak dimuat.`);
@@ -188,6 +218,7 @@ export class ApiController {
     const locationNames = new Map(locations.map(row => [row.LocationID, row.strLocationName]));
     return rows.map(row => ({ ...row, equipmentName: equipmentNames.get(row.equipmentID) ?? `Equipment #${row.equipmentID}`, locationName: locationNames.get(row.locationID) ?? `Lokasi #${row.locationID}` }));
   }
+  @RequirePermissions('equipment.view')
   @Get('equipment-checks/location') async lookup(@Query('apiId') apiId: unknown, @Query('equipmentId') equipmentId: unknown) {
     const pc = await this.registry.get(text(apiId, 'ID API'));
     const id = queryInteger(equipmentId, 'EquipmentID');
@@ -205,6 +236,7 @@ export class ApiController {
     }
     return { locationID: null, locationName: null, checkedLocationIDs, message: `${this.pc.label(pc)}: konfigurasi equipment ${id} tidak ditemukan pada lokasi terdaftar.` };
   }
+  @RequirePermissions('equipment.configure')
   @Post('equipment-checks/upsert') async upsert(@Body() body: unknown) {
     const data = object(body);
     const pc = await this.registry.get(text(data.apiId, 'ID API'));

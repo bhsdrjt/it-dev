@@ -1,0 +1,22 @@
+.audit-page { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.audit-page > :not(.audit-table) { flex-shrink: 0; }
+.audit-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.audit-filters label { flex: 1 1 170px; min-width: 0; }
+.audit-filters input, .audit-filters select { width: 100%; }
+.audit-table { flex: 1 1 220px; min-height: 160px; min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.audit-table table { width: 100%; min-width: 950px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.audit-table th, .audit-table td { padding: 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.audit-table th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.audit-table td { max-width: 320px; overflow-wrap: anywhere; }
+.audit-table summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.audit-table summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.audit-details { margin-top: 8px; }
+.audit-details dt { font-size: 12px; font-weight: 600; margin-top: 8px; }
+.audit-details dd { margin: 4px 0 0; }
+.audit-details pre { margin: 0; }
+.audit-table pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 320px; font-size: 12px; }
+.audit-table > p { padding: 16px; }
+.audit-outcome { border: 1px solid var(--border); padding: 3px 6px; border-radius: 4px; font-size: 12px; }
+.audit-outcome[data-outcome="failed"] { color: var(--danger, #b94343); }
+.audit-outcome[data-outcome="succeeded"] { color: var(--success, #27835b); }
+.audit-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }

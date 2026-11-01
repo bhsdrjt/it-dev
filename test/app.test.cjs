@@ -9,13 +9,15 @@ const sql = require('mssql');
 const { PcRegistryService } = require('../dist/registry');
 const { PcService, normalizeChecks } = require('../dist/pc');
 const { DbService } = require('../dist/db');
+const { AuthDbService, passwordHash } = require('../dist/auth-db');
 const { pcInput, queryInteger } = require('../dist/validation');
 const { createApp, validateEnvironment } = require('../dist/server');
 require('@nestjs/common').Logger.overrideLogger(false);
 
 process.env.JWT_SECRET = 'test-only-secret-not-for-production-123456789';
-process.env.AUTH_USERNAME = 'operator';
-process.env.AUTH_PASSWORD = 'test-only-password';
+process.env.AUTH_DB_USER = 'auth-test';
+process.env.AUTH_DB_PASSWORD = 'auth-test-password';
+process.env.AUTH_DB_DATABASE = 'ITMonitor';
 process.env.DB_SERVER = '127.0.0.1';
 process.env.DB_PORT = '9';
 process.env.DB_DATABASE = 'test';
@@ -295,6 +297,12 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
   process.env.APIS_FILE = join(dir, 'apis.json');
   validateEnvironment();
   const app = await createApp();
+  const authDb = app.get(AuthDbService);
+  const hash = await passwordHash('test-only-password');
+  const user = { id: 1, username: 'operator', displayName: 'Operator', tokenVersion: 1, roles: ['test'], permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view'] };
+  authDb.credentials = async username => username === user.username ? { id: user.id, tokenVersion: user.tokenVersion, passwordHash: hash } : undefined;
+  authDb.user = async id => id === user.id ? user : undefined;
+  authDb.audit = async () => undefined;
   let token = '';
   try {
     await app.listen(0, '127.0.0.1');
@@ -319,6 +327,26 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
     assert.equal((await request('/apis', 'GET', undefined, token + 'broken')).status, 401);
     const expired = jwt.sign({}, process.env.JWT_SECRET, { expiresIn: -1, issuer: 'it-dev-ops', audience: 'it-dev-ops-ui' });
     assert.equal((await request('/apis', 'GET', undefined, expired)).status, 401);
+    assert.equal((await request('/auth/me')).body.userId, user.id);
+    const loadUser = authDb.user;
+    authDb.user = async () => ({ ...user, permissions: [] });
+    assert.equal((await request('/apis')).status, 403);
+    assert.equal((await request('/auth/me')).status, 200);
+    authDb.user = async () => undefined; // Disabled users are absent from active-user lookup.
+    assert.equal((await request('/apis')).status, 401);
+    assert.equal((await request('/auth/login', 'POST', { username: 'operator', password: 'test-only-password' })).status, 401);
+    authDb.user = async () => ({ ...user, tokenVersion: 2 });
+    assert.equal((await request('/apis')).status, 401);
+    assert.equal((await request('/auth/login', 'POST', { username: 'operator', password: 'test-only-password' })).status, 401);
+    authDb.user = async () => { throw new (require('@nestjs/common').ServiceUnavailableException)('Database autentikasi tidak tersedia.'); };
+    const unavailable = await request('/apis');
+    assert.equal(unavailable.status, 503);
+    assert.equal(unavailable.body.message, 'Database autentikasi tidak tersedia.');
+    authDb.user = loadUser;
+    const credentials = authDb.credentials;
+    authDb.credentials = async () => { throw new (require('@nestjs/common').ServiceUnavailableException)('Database autentikasi tidak tersedia.'); };
+    assert.equal((await request('/auth/login', 'POST', { username: 'operator', password: 'test-only-password' })).status, 503);
+    authDb.credentials = credentials;
     const db = app.get(DbService);
     const network = app.get(PcService);
     let replayCalls = 0;

@@ -1,3 +1,4 @@
+import { usePermissions } from './permissions';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Combobox } from './Combobox';
 import { confirmAction } from './confirm-action';
@@ -70,12 +71,14 @@ export function RelationModal({ row, api, close }: { row: Row; api: Props['api']
   </dialog>;
 }
 function CardActions({ row, disabled, busy, copy, generateSk, remove, restore }: { row: Row; disabled: boolean; busy?: boolean; copy: (row: Row) => void; generateSk: (row: Row) => void; remove: (row: Row) => void; restore: (row: Row) => void }) {
+  const can = usePermissions();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const options = useRef<HTMLDivElement>(null);
   const deleted = isDeleted(row);
   const blocked = disabled;
+  const hasMenu = !deleted && (can('transactions.delete') || (transactionKind(row) === 'Kirim' && (can('transactions.copy_loading') || can('transactions.generate_receipt'))));
   useLayoutEffect(() => {
     const menu = options.current;
     const button = trigger.current;
@@ -104,19 +107,20 @@ function CardActions({ row, disabled, busy, copy, generateSk, remove, restore }:
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
+  if (!hasMenu && !(deleted && can('transactions.restore'))) return null;
   return <div className={`card-actions${deleted ? ' card-actions-deleted' : ''}`} ref={root} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }} onKeyDown={event => {
     if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); }
   }}>
-    {deleted && <button type="button" className="transaction-icon-button" title="Pulihkan" aria-label={`Pulihkan ${transactionKind(row)} ${value(row.CTFinalTonnageID)}`} disabled={busy} onClick={() => restore(row)}>
+    {deleted && <button type="button" className="transaction-icon-button" hidden={!can('transactions.restore')} title="Pulihkan" aria-label={`Pulihkan ${transactionKind(row)} ${value(row.CTFinalTonnageID)}`} disabled={busy} onClick={() => restore(row)}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></svg>
     </button>}
-    <button type="button" className="transaction-icon-button" title="Aksi" ref={trigger} disabled={blocked || deleted} aria-busy={!!busy} aria-expanded={open && !blocked} aria-label={`Aksi ${transactionKind(row)} ${value(row.CTFinalTonnageID)}`} onClick={() => setOpen(!open)}>
+    <button type="button" className="transaction-icon-button" hidden={!hasMenu} title="Aksi" ref={trigger} disabled={blocked || deleted} aria-busy={!!busy} aria-expanded={open && !blocked} aria-label={`Aksi ${transactionKind(row)} ${value(row.CTFinalTonnageID)}`} onClick={() => setOpen(!open)}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
     </button>
     {open && !blocked && !deleted && <div className="card-actions-options" ref={options} popover="manual">
-      {transactionKind(row) === 'Kirim' && <button type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); copy(row); }}>Salin Muatan</button>}
-      {transactionKind(row) === 'Kirim' && <button type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); generateSk(row); }}>Generate SK Terima</button>}
-      <button type="button" className="danger" onClick={() => { trigger.current?.focus(); setOpen(false); remove(row); }}>Hapus</button>
+      {can('transactions.copy_loading') && transactionKind(row) === 'Kirim' && <button type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); copy(row); }}>Salin Muatan</button>}
+      {transactionKind(row) === 'Kirim' && <button hidden={!can('transactions.generate_receipt')} type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); generateSk(row); }}>Generate SK Terima</button>}
+      <button hidden={!can('transactions.delete')} type="button" className="danger" onClick={() => { trigger.current?.focus(); setOpen(false); remove(row); }}>Hapus</button>
     </div>}
   </div>;
 }
@@ -210,6 +214,7 @@ function SalinMuatanModal({ api, row, busy, close, submit, submitKeTerimaAda }: 
   </dialog>;
 }
 export function Transactions({ api, log, initialCdn = '' }: Props) {
+  const can = usePermissions();
   const [relationRow, setRelationRow] = useState<Row | null>(null);
   const [cdn, setCdn] = useState(initialCdn);
   const [result, setResult] = useState<Result | null>(null);
@@ -578,10 +583,10 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
               <span>RefDumpingTonnageID: <strong>
                 {value(loading.RefDumpingTonnageID)}
               </strong>
-                {loading.RefDumpingTonnageID == null && <button type="button" className="transaction-icon-button" title="Pasangkan Terima" aria-busy={activeRow === Number(loading.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload || isDeleted(loading)} onClick={() => void releaseRelation(loading, true)} aria-label={`Pasangkan Terima untuk Kirim ${value(loading.CTFinalTonnageID)}`}>
+                {loading.RefDumpingTonnageID == null && <button type="button" className="transaction-icon-button" hidden={!can('transactions.pair')} title="Pasangkan Terima" aria-busy={activeRow === Number(loading.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload || isDeleted(loading)} onClick={() => void releaseRelation(loading, true)} aria-label={`Pasangkan Terima untuk Kirim ${value(loading.CTFinalTonnageID)}`}>
                   <ActionIcon action="link" />
                 </button>}
-                {loading.RefDumpingTonnageID !== null && loading.RefDumpingTonnageID !== undefined && <button type="button" className="transaction-icon-button" title="Lepas Relasi" aria-busy={activeRow === Number(loading.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload} onClick={() => void releaseRelation(loading)} aria-label={`Lepas relasi Kirim ${value(loading.CTFinalTonnageID)} dari Terima ${value(loading.RefDumpingTonnageID)}`}>
+                {loading.RefDumpingTonnageID !== null && loading.RefDumpingTonnageID !== undefined && <button type="button" className="transaction-icon-button" hidden={!can('transactions.unpair')} title="Lepas Relasi" aria-busy={activeRow === Number(loading.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload} onClick={() => void releaseRelation(loading)} aria-label={`Lepas relasi Kirim ${value(loading.CTFinalTonnageID)} dari Terima ${value(loading.RefDumpingTonnageID)}`}>
                   <ActionIcon action="unlink" />
                 </button>}
               </span>
@@ -672,7 +677,7 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
             <tbody>
               {raw.map((row, index) => <tr key={index} className={`${sameCdn(row, result.coalDeliveryNumber) ? 'selected-row' : ''} ${isDeleted(row) ? 'deleted-record' : ''}`}>
                 <td>
-                  <button type="button" className="transaction-icon-button" title="Masukkan ke Terima" aria-busy={activeRow === Number(row.CTFinalTonnageID) && promoting} disabled={promoting || releasing || promotionNeedsReload || isDeleted(row) || !Number.isInteger(Number(row.CTFinalTonnageID)) || Number(row.CTFinalTonnageID) <= 0 || Number(row.CTFinalTonnageID) > 2147483647} onClick={() => void promoteRaw(row)} aria-label={`Masukkan RawTerima ${value(row.CTFinalTonnageID)} ke Terima`}>
+                  <button type="button" className="transaction-icon-button" hidden={!can('transactions.replay_raw')} title="Masukkan ke Terima" aria-busy={activeRow === Number(row.CTFinalTonnageID) && promoting} disabled={promoting || releasing || promotionNeedsReload || isDeleted(row) || !Number.isInteger(Number(row.CTFinalTonnageID)) || Number(row.CTFinalTonnageID) <= 0 || Number(row.CTFinalTonnageID) > 2147483647} onClick={() => void promoteRaw(row)} aria-label={`Masukkan RawTerima ${value(row.CTFinalTonnageID)} ke Terima`}>
                     <ActionIcon action="receive" />
                   </button>
                 </td>
@@ -717,12 +722,12 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
                 <span>SK {value(row.CoalDeliveryNumber)}</span>
                 <span className="mono">ID {value(row.CTFinalTonnageID)}</span>
                 {['Kirim', 'Terima'].includes(transactionKind(row)) && <button type="button" className="transaction-icon-button" title="Cek relasi" disabled={promoting || releasing} onClick={() => setRelationRow(row)} aria-label={`Cek relasi ${transactionKind(row)} ${value(row.CTFinalTonnageID)}`}><ActionIcon action="inspect" /></button>}
-                {transactionKind(row) === 'Kirim' && row.RefDumpingTonnageID == null && <button type="button" className="transaction-icon-button" title="Pasangkan Terima" aria-busy={activeRow === Number(row.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload || isDeleted(row)} onClick={() => void releaseRelation(row, true)} aria-label={`Pasangkan Terima untuk Kirim ${value(row.CTFinalTonnageID)}`}>
+                {transactionKind(row) === 'Kirim' && row.RefDumpingTonnageID == null && <button type="button" className="transaction-icon-button" hidden={!can('transactions.pair')} title="Pasangkan Terima" aria-busy={activeRow === Number(row.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload || isDeleted(row)} onClick={() => void releaseRelation(row, true)} aria-label={`Pasangkan Terima untuk Kirim ${value(row.CTFinalTonnageID)}`}>
                   <ActionIcon action="link" />
                 </button>}
                 {transactionKind(row) === 'Kirim' && row.RefDumpingTonnageID !== null && row.RefDumpingTonnageID !== undefined && <>
                   <span>Ref: <strong>{value(row.RefDumpingTonnageID)}</strong></span>
-                  <button type="button" className="transaction-icon-button" title="Lepas Relasi" aria-busy={activeRow === Number(row.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload} onClick={() => void releaseRelation(row)} aria-label={`Lepas relasi Kirim ${value(row.CTFinalTonnageID)} dari Terima ${value(row.RefDumpingTonnageID)}`}>
+                  <button type="button" className="transaction-icon-button" hidden={!can('transactions.unpair')} title="Lepas Relasi" aria-busy={activeRow === Number(row.CTFinalTonnageID) && releasing} disabled={releasing || promoting || promotionNeedsReload} onClick={() => void releaseRelation(row)} aria-label={`Lepas relasi Kirim ${value(row.CTFinalTonnageID)} dari Terima ${value(row.RefDumpingTonnageID)}`}>
                     <ActionIcon action="unlink" />
                   </button>
                 </>}

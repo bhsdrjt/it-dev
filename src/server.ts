@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Request, Response, NextFunction } from 'express';
 import { resolve } from 'node:path';
 import { ApiController } from './api';
-import { AuthController, JwtGuard } from './auth';
+import { AuthModule } from './auth';
 import { DbService } from './db';
 import { PcService } from './pc';
 import { PcRegistryService } from './registry';
@@ -21,14 +21,14 @@ class ErrorFilter implements ExceptionFilter {
     response.status(status).json({ statusCode: status, message, ...(queries.length ? { queries } : {}) });
   }
 }
-@Module({ controllers: [AuthController, ApiController], providers: [JwtGuard, DbService, PcService, PcRegistryService] })
+@Module({ imports: [AuthModule], controllers: [ApiController], providers: [DbService, PcService, PcRegistryService] })
 export class AppModule { }
 export function validateEnvironment() {
-  for (const key of ['JWT_SECRET', 'AUTH_USERNAME', 'AUTH_PASSWORD', 'DB_SERVER', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD']) {
+  for (const key of ['JWT_SECRET', 'DB_SERVER', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD', 'AUTH_DB_USER', 'AUTH_DB_PASSWORD']) {
     if (!process.env[key]?.trim()) throw new Error(`Environment ${key} wajib diisi. Salin .env.example ke .env.`);
   }
   if (process.env.JWT_SECRET!.length < 32) throw new Error('JWT_SECRET minimal 32 karakter acak.');
-  if (process.env.AUTH_USERNAME!.length > 200 || process.env.AUTH_PASSWORD!.length > 1000) throw new Error('Kredensial melebihi batas panjang.');
+  if ((process.env.AUTH_DB_DATABASE || 'ITMonitor').toLowerCase() === process.env.DB_DATABASE!.toLowerCase()) throw new Error('Database autentikasi harus berbeda dari database produksi.');
   for (const key of ['PORT', 'DB_PORT', 'PING_TIMEOUT_MS', 'LOOKUP_TIMEOUT_MS']) {
     const value = process.env[key];
     if (value !== undefined && (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > (key.endsWith('PORT') ? 65535 : 60000))) throw new Error(`${key} tidak valid.`);

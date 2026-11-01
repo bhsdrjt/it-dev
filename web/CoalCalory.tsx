@@ -1,3 +1,4 @@
+import { usePermissions } from './permissions';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { confirmAction } from './confirm-action';
 import { SkeletonPanel } from './SkeletonPanel';
@@ -32,6 +33,8 @@ export function parseCoalCaloryImport(text: string): { name: string; calory: str
 
 /** Menu Coal Calory: kelola data tabCoalQualityAGM (edit dan hapus saja, tanpa tambah). */
 export function CoalCalory({ api, log }: Props) {
+  const can = usePermissions();
+  const hasActions = can('coal.update') || can('coal.delete');
   const [rows, setRows] = useState<CoalCaloryRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [coalLoading, setCoalLoading] = useState(false);
@@ -138,12 +141,12 @@ export function CoalCalory({ api, log }: Props) {
           <span className="section-index">01 / COAL CALORY</span>
           <h2>Data kualitas batu bara <span className="count">{rows.length}</span></h2>
         </div>
-        <span className="small-tag">EDIT / HAPUS</span>
+        <span className="small-tag" hidden={!hasActions}>{[can('coal.update') && 'EDIT', can('coal.delete') && 'HAPUS'].filter(Boolean).join(' / ')}</span>
       </div>
       <div className="panel-toolbar">
         <label className="search-label">Cari data<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="ID, CoalQualityID, atau nama kualitas" disabled={busy} autoComplete="off" /></label>
-        <button type="button" className="icon-button" title="Impor CSV" aria-label="Impor CSV" onClick={() => fileInput.current?.click()} disabled={busy}><Icon name="upload" /></button>
-        <button type="button" className="icon-button" title="Ekspor CSV" aria-label="Ekspor CSV" onClick={() => setExporting(true)} disabled={busy || !rows.length}><Icon name="download" /></button>
+        <button type="button" className="icon-button" hidden={!can('coal.import')} title="Impor CSV" aria-label="Impor CSV" onClick={() => fileInput.current?.click()} disabled={busy}><Icon name="upload" /></button>
+        <button type="button" className="icon-button" hidden={!can('coal.export')} title="Ekspor CSV" aria-label="Ekspor CSV" onClick={() => setExporting(true)} disabled={busy || !rows.length}><Icon name="download" /></button>
         {/* ponytail: parser lokal tanpa library; bila perlu quote/koma di dalam nama, pakai parser CSV khusus. */}
         <input ref={fileInput} type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={event => {
           const file = event.target.files?.[0];
@@ -166,7 +169,7 @@ export function CoalCalory({ api, log }: Props) {
               {header('CoalQualityName', 'CoalQualityName')}
               {header('Coalcalory', 'Coalcalory')}
               {header('dtUpdatedAt', 'Diperbarui')}
-              <th><span className="sr-only">Aksi</span></th>
+              <th hidden={!hasActions}><span className="sr-only">Aksi</span></th>
             </tr>
           </thead>
           <tbody>
@@ -176,10 +179,10 @@ export function CoalCalory({ api, log }: Props) {
               <td>{row.CoalQualityName || <span className="muted">—</span>}</td>
               <td className="mono">{row.Coalcalory ?? <span className="muted">belum diisi</span>}</td>
               <td className="mono">{time(row.dtUpdatedAt)}</td>
-              <td>
+              <td hidden={!hasActions}>
                 <div className="row-actions">
-                  <button className="transaction-icon-button" title={`Edit Coal Calory ${row.CoalQualityAGMID}`} onClick={() => { setEditing(row); log('info', `Edit Coal Calory #${row.CoalQualityAGMID}.`); }} disabled={busy} aria-label={`Edit Coal Calory ${row.CoalQualityAGMID}`}><Icon name="edit" /></button>
-                  <button className="transaction-icon-button danger-text" title={`Hapus Coal Calory ${row.CoalQualityAGMID}`} onClick={() => void remove(row)} disabled={busy} aria-label={`Hapus Coal Calory ${row.CoalQualityAGMID}`}><Icon name="trash" /></button>
+                  <button className="transaction-icon-button" hidden={!can('coal.update')} title={`Edit Coal Calory ${row.CoalQualityAGMID}`} onClick={() => { setEditing(row); log('info', `Edit Coal Calory #${row.CoalQualityAGMID}.`); }} disabled={busy} aria-label={`Edit Coal Calory ${row.CoalQualityAGMID}`}><Icon name="edit" /></button>
+                  <button className="transaction-icon-button danger-text" hidden={!can('coal.delete')} title={`Hapus Coal Calory ${row.CoalQualityAGMID}`} onClick={() => void remove(row)} disabled={busy} aria-label={`Hapus Coal Calory ${row.CoalQualityAGMID}`}><Icon name="trash" /></button>
                 </div>
               </td>
             </tr>)}
@@ -300,7 +303,7 @@ function CoalCaloryImport({ plan, rows, api, log, close, done }: {
     try {
       for (const item of matched) {
         try {
-          await api<{ message: string }>(`/coal-calories/${item.row.CoalQualityAGMID}`, 'PUT', { coalQualityName: item.name, coalcalory: item.calory });
+          await api<{ message: string }>(`/coal-calories/${item.row.CoalQualityAGMID}/import`, 'PUT', { coalQualityName: item.name, coalcalory: item.calory });
           updated++;
         } catch (cause) {
           failures.push(`${item.name}: ${message(cause)}`);
@@ -342,7 +345,7 @@ function CoalCaloryImport({ plan, rows, api, log, close, done }: {
   </dialog>;
 }
 
-/** Ekspor 2 kolom (CoalQualityName, Coalcalory) sesuai cakupan pilihan; tanpa request tambahan. */
+/** Ekspor 2 kolom tanpa request tambahan. coal.export membatasi UI; pengguna coal.view tetap dapat menyalin data yang sudah dibaca. */
 function CoalCaloryExport({ rows, log, close }: {
   rows: CoalCaloryRow[];
   log: Props['log'];
