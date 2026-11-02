@@ -25,7 +25,7 @@ export type AuthUser = { id: number; username: string; displayName: string; toke
 export class AuthDbService implements OnModuleDestroy {
   private pool?: sql.ConnectionPool;
   private connecting?: Promise<sql.ConnectionPool>;
-  private async connect(): Promise<sql.ConnectionPool> {
+  async connect(): Promise<sql.ConnectionPool> {
     if (this.pool?.connected) return this.pool;
     if (this.connecting) return this.connecting;
     const pool = new sql.ConnectionPool({

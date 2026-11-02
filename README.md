@@ -8,7 +8,7 @@ Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi eq
 - **Pengguna:** akun individual dengan role dan permission per menu/aksi. Autentikasi disimpan di database `ITMonitor`, terpisah dari database produksi pada instance SQL Server yang sama.
 - **Stack:** NestJS 12 + TypeScript (backend), React 19 + TypeScript (frontend SPA, di-bundle esbuild), mssql, axios, ping, jsonwebtoken. Node.js 22.13+.
 - **Arsitektur:** browser SPA berkomunikasi ke backend NestJS di port 3000 via HTTP + JWT. Backend baca data referensi dari SQL Server pusat dan mengirim/ambil data konfigurasi langsung ke API lokal di tiap PC target.
-- **Penyimpanan:** daftar PC target disimpan di file JSON registry (`data/apis.json`, dapat diubah via `APIS_FILE`) dengan tulisan atomik. Equipment dan lokasi dibaca dari SQL Server (`tabEquipment`, `tabLocation`). Konfigurasi check adalah sumber kebenaran di API tiap PC target, bukan di database pusat.
+- **Penyimpanan:** daftar PC target disimpan di `ITMonitor.dbo.ApiTargets`, memakai `Id INT IDENTITY(1,1)`, `LocationIDs` JSON berurutan, pool SQL auth dan transaksi atomik. Equipment dan lokasi dibaca dari SQL Server (`tabEquipment`, `tabLocation`). Konfigurasi check adalah sumber kebenaran di API tiap PC target, bukan di database pusat.
 - **Tidak ada mode demo atau data produksi buatan.** Semua data berasal dari kredensial `.env`, database, dan PC target nyata.
 
 ### Alur kerja harian
@@ -44,7 +44,7 @@ Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi. Jika API lok
    node -e "console.log(require('node:crypto').randomBytes(48).toString('hex'))"
    ```
 
-5. Jalankan `npm start`, lalu buka `http://localhost:3000`. Perintah ini membangun backend/UI sebelum menjalankan server. Untuk menjalankan hasil build tanpa membangun ulang: `npm run serve`.
+5. Selesaikan setup auth dan migrasi registry SQL di bawah sebelum menjalankan backend baru. Jalankan `npm start`, lalu buka `http://localhost:3000`. Perintah ini membangun backend/UI sebelum menjalankan server. Untuk menjalankan hasil build tanpa membangun ulang: `npm run serve`.
 
 Server menolak startup bila variabel wajib kosong. Kredensial asli tidak disertakan. SQL Server tidak harus online saat startup; kegagalan query ditampilkan sebagai HTTP 503 dan koneksi dicoba kembali pada permintaan berikutnya. Jika `ITMonitor` tidak tersedia, login dan request terlindungi ditolak dengan 503; tidak ada fallback akun `.env`.
 
@@ -91,7 +91,19 @@ Variabel PRD tersedia di `.env.example`. Tambahan koneksi SQL Server:
 | `DB_ENCRYPT` | `true` | Enkripsi koneksi SQL Server |
 | `DB_TRUST_SERVER_CERTIFICATE` | `false` | Abaikan validasi sertifikat hanya jika sengaja disetel `true` |
 
-`APIS_FILE` relatif terhadap direktori kerja. File belum ada dibaca sebagai registry kosong; file dibuat ketika PC pertama disimpan. Format:
+### Migrasi registry JSON ke ITMonitor
+
+1. Hentikan backend lama dan backup JSON serta database. DBA menjalankan `sql/api-registry.sql` setelah setup auth. Script rerunnable, hanya membuat tabel yang belum ada; tidak dijalankan otomatis.
+2. Berikan `SELECT, INSERT, UPDATE, DELETE` pada `dbo.ApiTargets` kepada user `AUTH_DB_USER`. DDL tetap hak DBA, bukan runtime. Jika tabel existing masih memakai UUID/string, gunakan `sql/api-registry-identity.sql` saat aplikasi dihentikan, bukan script pembuatan baru. Migrasi mempertahankan tabel lama sebagai `ApiTargets_LegacyIds` dan mapping ID pada `ApiTargetIdMap`. Berikan ulang izin CRUD pada tabel baru; cabut izin tulis runtime pada backup.
+3. Jalankan `npm run build`, lalu impor eksplisit:
+
+   ```powershell
+   node --env-file-if-exists=.env sql/import-api-registry.cjs data/apis.json
+   ```
+
+4. Periksa hasil impor lalu jalankan backend baru. File sumber tidak diubah. Tidak ada impor saat startup atau fallback JSON ketika SQL gagal (HTTP 503).
+
+`APIS_FILE` hanya alternatif path input CLI, relatif terhadap direktori kerja; bukan penyimpanan runtime. Input hilang/rusak ditolak, termasuk UTF-8 BOM yang dinormalisasi sebelum parsing. Seluruh input divalidasi sebelum koneksi/tulisan DB. Impor satu transaksi menghasilkan ID identity baru dan mempertahankan urutan lokasi. ID/lokasi duplikat dan nama/IP ambigu ditolak. Rerun mencocokkan nama/IP dan melewati baris persis sama; konflik membatalkan seluruh impor tanpa overwrite. ID lama dalam JSON tidak menjadi ID SQL. Daftar PC diurutkan berdasarkan nama lalu ID, tanpa kolom urutan. Impor tidak menghubungi DB produksi untuk validasi lokasi aktif; endpoint edit/tambah tetap memvalidasinya. Format:
 
 ```json
 [
@@ -106,7 +118,7 @@ Variabel PRD tersedia di `.env.example`. Tambahan koneksi SQL Server:
 
 Alamat di atas hanya contoh dokumentasi, bukan PC bawaan. ID PC dibuat otomatis oleh aplikasi. IP hanya IPv4 literal, tanpa protokol/port/path. LocationID wajib integer nonnegatif dan lokasi aktif type 7. Daftar lokasi kosong diperbolehkan, tetapi PC tersebut belum dapat menerima konfigurasi.
 
-Registry dibaca ulang pada setiap operasi, mendukung UTF-8 BOM, dan menolak file rusak tanpa menimpanya. Penulisan menggunakan file sementara, `fsync`, dan rename dengan antrean dalam proses. **Jalankan satu proses server per file registry.** Jangan menulis file manual bersamaan dengan mutasi aplikasi; penyunting eksternal tidak mengikuti antrean. Backup file sebelum penyuntingan manual.
+Registry dibaca dari SQL pada setiap operasi. Mutasi memakai transaksi SERIALIZABLE dan lock tabel target untuk mencegah konflik lintas worker; daftar lokasi JSON diganti atomik. Penghapusan PC hanya menghapus baris registry, bukan data produksi atau log audit. Backup registry kini melalui backup ITMonitor.
 
 ## Alur operator
 
@@ -192,7 +204,7 @@ npm test
 npm audit
 ```
 
-`npm test` membangun aplikasi, lalu memakai `node:test` dan `node:assert` tanpa framework tambahan. Cakupan: validasi input, normalisasi respons, BOM, write serentak, file rusak, ICMP/TCP, kegagalan request, pool reconnect, login/JWT 12 jam, endpoint tanpa token, CRUD HTTP, lookup berurutan/berhenti saat gagal, resolving nama, validasi upsert, dan DB 503. Tes memakai folder temporer dan stub jaringan/SQL, bukan database atau PC produksi.
+`npm test` membangun aplikasi, lalu memakai `node:test` dan `node:assert` tanpa framework tambahan. Cakupan: validasi input, normalisasi respons, BOM dan validasi impor, mapping SQL, rollback mutasi, konflik/rerun impor, ICMP/TCP, kegagalan request, pool reconnect, login/JWT 12 jam, endpoint tanpa token, CRUD HTTP, lookup berurutan/berhenti saat gagal, resolving nama, validasi upsert, dan DB 503. Tes memakai folder temporer dan stub jaringan/SQL, bukan database atau PC produksi.
 
 Pemeriksaan browser lokal: login, registry kosong, error DB, dan dialog tambah/tutup PC. Integrasi SQL Server dan API PC nyata belum diverifikasi karena koneksi/kredensial belum diberikan.
 
@@ -210,7 +222,7 @@ Override `multer` dan `@azure/msal-node` di `package.json` menghindari versi tra
 src/server.ts       bootstrap, konfigurasi, security headers, error filter
 src/auth.ts         login, pembatasan percobaan, JWT guard
 src/api.ts          endpoint dan orkestrasi validasi
-src/registry.ts     registry JSON atomik dan serial
+src/registry.ts     registry SQL atomik dan impor eksplisit
 src/db.ts           query referensi dan pool SQL Server
 src/pc.ts           ICMP/TCP, HTTP PC, normalisasi respons
 src/validation.ts   validasi input

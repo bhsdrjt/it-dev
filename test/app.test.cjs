@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtemp, readFile, writeFile, rm, readdir } = require('node:fs/promises');
+const { mkdtemp, rm } = require('node:fs/promises');
 const { join } = require('node:path');
 const jwt = require('jsonwebtoken');
 const ping = require('ping');
@@ -38,30 +38,6 @@ test('input validation and case-insensitive response normalization', () => {
   }
   assert.deepEqual(normalizeChecks({ data: [] }), []);
   for (const value of [null, {}, { data: null }, [{ equipmentID: null, locationID: 1, isGenerateCDN: false }], [{ equipmentID: 1, locationID: 1, isGenerateCDN: 'wrong' }]]) assert.throws(() => normalizeChecks(value));
-});
-
-test('registry handles BOM, concurrent writes, rereads, corrupt files and failed queue entries', async () => {
-  const dir = await mkdtemp(join(tempRoot, 'registry-test-'));
-  process.env.APIS_FILE = join(dir, 'apis.json');
-  try {
-    const registry = new PcRegistryService();
-    assert.deepEqual(await registry.list(), []);
-    await writeFile(process.env.APIS_FILE, '\uFEFF[]');
-    await Promise.all(Array.from({ length: 15 }, (_, index) => registry.save({ ...pc, apiName: `PC ${index}` })));
-    assert.equal((await registry.list()).length, 15);
-    await assert.rejects(registry.remove('missing'), /tidak ditemukan/);
-    const created = await registry.save({ ...pc, apiName: 'after failure' });
-    assert.equal((await registry.list()).length, 16);
-    await registry.save({ ...pc, apiName: 'updated' }, created.id);
-    assert.equal((await new PcRegistryService().get(created.id)).apiName, 'updated');
-    await registry.remove(created.id);
-    await writeFile(process.env.APIS_FILE, JSON.stringify([pc]));
-    assert.equal((await registry.list())[0].apiName, pc.apiName);
-    await writeFile(process.env.APIS_FILE, 'broken json');
-    await assert.rejects(registry.save(pc), /tidak dapat dibaca/);
-    assert.equal(await readFile(process.env.APIS_FILE, 'utf8'), 'broken json');
-    assert.deepEqual(await readdir(dir), ['apis.json']);
-  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('ICMP success, TCP fallback, offline and upstream write uncertainty', async () => {
@@ -297,6 +273,17 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
   process.env.APIS_FILE = join(dir, 'apis.json');
   validateEnvironment();
   const app = await createApp();
+  const registry = app.get(PcRegistryService);
+  let targets = [];
+  registry.list = async () => structuredClone(targets);
+  let nextTargetId = 1;
+  registry.save = async (data, id = String(nextTargetId++)) => {
+    const row = { ...data, id };
+    const index = targets.findIndex(pc => pc.id === id);
+    if (index < 0) targets.push(row); else targets[index] = row;
+    return row;
+  };
+  registry.remove = async id => { await registry.get(id); targets = targets.filter(pc => pc.id !== id); return { message: 'Removed' }; };
   const authDb = app.get(AuthDbService);
   const hash = await passwordHash('test-only-password');
   const user = { id: 1, username: 'operator', displayName: 'Operator', tokenVersion: 1, roles: ['test'], permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view'] };
@@ -406,7 +393,7 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
     assert.equal((await request('/apis')).body.length, 1);
     assert.equal((await request('/apis/ping', 'POST', { apiId: id })).body[0].method, 'tcp');
     assert.equal((await request(`/apis/${id}`, 'PUT', { ...pc, apiName: 'Updated PC' })).status, 200);
-    assert.equal(JSON.parse(await readFile(process.env.APIS_FILE, 'utf8'))[0].apiName, 'Updated PC');
+    assert.equal((await registry.list())[0].apiName, 'Updated PC');
     let probes = [];
     network.checks = async (_pc, params) => {
       if (!params) return [{ equipmentID: 10, locationID: 8, isGenerateCDN: false }];
@@ -442,6 +429,6 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
     assert.equal((await request('/equipments')).status, 503);
     assert.equal((await request('/apis')).status, 200);
     assert.equal((await request(`/apis/${id}`, 'DELETE')).status, 200);
-    assert.deepEqual(JSON.parse(await readFile(process.env.APIS_FILE, 'utf8')), []);
+    assert.deepEqual(await registry.list(), []);
   } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }
 });
