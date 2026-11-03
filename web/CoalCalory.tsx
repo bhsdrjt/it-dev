@@ -122,9 +122,7 @@ export function CoalCalory({ api, log }: Props) {
     <>
     <div className="page-heading">
       <div>
-        <p className="eyebrow">WORKSPACE OPERASIONAL</p>
         <h1 id="coal-calory-title">Coal calory</h1>
-        <p>Kelola data kalori pada tabCoalQualityAGM. Aksi tersedia: edit dan hapus.</p>
       </div>
       <div className="heading-actions">
         <span>Baris aktif <strong className="mono">{String(rows.length).padStart(2, '0')}</strong></span>

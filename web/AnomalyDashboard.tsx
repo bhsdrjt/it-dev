@@ -201,9 +201,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
   return <div className="anomaly-page">
     <div className="page-heading">
       <div>
-        <p className="eyebrow">MONITORING OPERASIONAL</p>
         <h1 id="anomalies-title">Monitoring transaksi</h1>
-        <p className="subtitle">Temuan lintas SK dan truck. Verifikasi setiap temuan di Analisa transaksi sebelum mengambil tindakan.</p>
       </div>
       <div className="heading-actions">
         <div className="anomaly-refresh-meta">
@@ -269,7 +267,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
     {loading ? (
     <section className="panel anomaly-skeleton" aria-label="Memuat data anomali" aria-busy="true">
       <div className="panel-heading">
-        <div><span className="section-index">MONITORING OPERASIONAL</span><h2 id="anomalies-title">Monitoring transaksi</h2></div>
+        <div><h2 id="anomalies-title">Monitoring transaksi</h2></div>
       </div>
       <div className="anomaly-skeleton-body">
         <div className="skeleton-row">

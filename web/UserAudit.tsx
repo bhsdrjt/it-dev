@@ -30,7 +30,7 @@ export function UserAudit({ api }: { api: Api }) {
   return <section className="audit-page menu-page" aria-label="User Audit">
     <div className="page-heading"><h1>User Audit</h1><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>Muat ulang</button></div>
     <form className="audit-filters" onSubmit={filter}>
-      <label>Username<input name="user" maxLength={200} placeholder="Semua pengguna" /></label>
+      <label>Username<input name="user" maxLength={200} placeholder="Semua user" /></label>
       <label>Hasil<select name="outcome"><option value="">Semua hasil</option>{Object.entries(outcomes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>Mulai (UTC)<input name="start" type="datetime-local" step="1" /></label>
       <label>Akhir eksklusif (UTC)<input name="end" type="datetime-local" step="1" /></label>

@@ -1,3 +1,4 @@
+import { BiostarImport } from './BiostarImport';
 import { AccessManagement } from './AccessManagement';
 import { PermissionsContext, pagePermissions } from './permissions';
 import { UserAudit } from './UserAudit';
@@ -56,6 +57,7 @@ const menuIcons = {
   audit: 'M14 21H5V3h10l4 4v5M14 3v5h5M8 11h5M8 15h3M19 16a3 3 0 1 0-6 0 3 3 0 0 0 6 0m-1 2 3 3',
   history: 'M3 16V7a1 1 0 0 1 1-1h9v10H3zm10 0h4l3 3v-3h1a1 1 0 0 0 0-2h-1v-3M6.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
   calory: 'M12 3c1 3 4 4 4 8a4 4 0 0 1-8 0c0-2 1-3 2-4 0 1.5.8 2.2 1.6 2.5C11.2 7.5 11.4 5 12 3z',
+  import: 'M12 3v12m-4-4 4 4 4-4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4',
 } as const;
 function MenuIcon({ name }: { name: keyof typeof menuIcons }) {
   return <svg className="sidebar-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={menuIcons[name]} /></svg>;
@@ -152,7 +154,7 @@ function App() {
         <button className="primary wide" disabled={busy}>
           {busy ? 'Memeriksa akun…' : 'Masuk workspace'}
         </button>
-        <p className="footnote">Sesi berlaku 12 jam. Hanya untuk pengguna berwenang.</p>
+        <p className="footnote">Sesi berlaku 12 jam. Hanya untuk user berwenang.</p>
       </form>
     </section>
   </main>;
@@ -346,7 +348,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
     });
   }
   const pcRows = pcs.filter(pc => `${pc.apiName} ${pc.ipAPI} ${pc.locationIDs.map(id => `${id} ${locations.find(l => l.LocationID === id)?.strLocationName || ''}`).join(' ')}`.toLowerCase().includes(pcSearch.toLowerCase()));
-  const pageLabel = { equipment: 'Equipment checks', transactions: 'Analisa transaksi', anomalies: 'Monitoring transaksi', 'truck-history': 'Timeline truck', 'coal-calory': 'Coal calory', activity: 'Activity log', access: 'Manajemen akses', audit: 'User Audit' } as const;
+  const pageLabel = { equipment: 'Equipment checks', transactions: 'Analisa transaksi', anomalies: 'Monitoring transaksi', 'truck-history': 'Timeline truck', 'coal-calory': 'Coal calory', activity: 'Activity log', access: 'Manajemen akses', 'biostar-import': 'Import Biostar', audit: 'User Audit' } as const;
   return <div className="workspace">
     <aside className="sidebar">
       <a className="brand" href="#workspace" onClick={() => firstPage && setPage(firstPage)}><span className="brand-mark">IT</span> DEV OPS</a>
@@ -357,9 +359,10 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
         <button hidden={!can('transactions.view')} aria-current={page === 'transactions' ? 'page' : undefined} onClick={() => setPage('transactions')}><MenuIcon name="transactions" /> Analisa transaksi</button>
         <button hidden={!can('timeline.view')} aria-current={page === 'truck-history' ? 'page' : undefined} onClick={() => setPage('truck-history')}><MenuIcon name="history" /> Timeline truck</button>
         <button hidden={!can('coal.view')} aria-current={page === 'coal-calory' ? 'page' : undefined} onClick={() => setPage('coal-calory')}><MenuIcon name="calory" /> Coal calory</button>
-        <button hidden={!can('activity.view')} aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
+        {can('biostar.import.view') && <button className="biostar-nav" aria-current={page === 'biostar-import' ? 'page' : undefined} onClick={() => setPage('biostar-import')}><MenuIcon name="import" /> Import Biostar</button>}
         {can('access.manage') && <button aria-current={page === 'access' ? 'page' : undefined} onClick={() => setPage('access')}><MenuIcon name="access" /> Manajemen akses</button>}
         {isAdmin && <button aria-current={page === 'audit' ? 'page' : undefined} onClick={() => setPage('audit')}><MenuIcon name="audit" /> User Audit</button>}
+        <button hidden={!can('activity.view')} aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
       </nav>
       <span className="sidebar-footer">INTERNAL OPERATIONS<br />IT Dev Ops · v1.0</span>
     </aside>
@@ -377,7 +380,6 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
       {equipmentVisited && can('equipment.view') && <div className="equipment-page menu-page" hidden={page !== 'equipment'}>
         <div className="page-heading">
           <div>
-            <p className="eyebrow">WORKSPACE OPERASIONAL</p>
             <h1>Equipment checks</h1>
           </div>
           <div className="heading-actions">
@@ -563,7 +565,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
         </div>
       </div>}
       <section className="equipment-page activity-page menu-page" hidden={page !== 'activity' || !can('activity.view')} aria-labelledby="activity-title">
-        <div className="page-heading"><div><p className="eyebrow">JEJAK SESI</p><h1 id="activity-title">Activity log</h1><p>Aktivitas lintas menu selama sesi ini.</p></div></div>
+        <div className="page-heading"><h1 id="activity-title">Activity log</h1></div>
         <section className="activity">
           <div className="activity-heading"><h2>Catatan sesi <span className="count">{entries.length}</span></h2><span>SESI INI · WAKTU LOKAL</span></div>
           <div className="log-list" role="log" aria-label="Activity log" aria-live="polite">
@@ -595,6 +597,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
         {visited.has('coal-calory') && can('coal.view') && <CoalCalory api={api} log={log} />}
       </section>
       {page === 'access' && can('access.manage') && <AccessManagement api={api} />}
+      {page === 'biostar-import' && can('biostar.import.view') && <BiostarImport api={api} />}
       {page === 'audit' && isAdmin && <UserAudit api={api} />}
     </main>
     {editor && <PcEditor pc={editor} locations={locations} disabled={!!errors.locations || busy.locations} api={api} log={log} close={() => setEditor(null)} saved={pc => {

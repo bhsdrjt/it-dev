@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, OnModuleDestroy, OnModuleInit, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes, scrypt as derive, timingSafeEqual } from 'node:crypto';
 import sql from 'mssql';
 import { queryInteger, sqlDateTime, text } from './validation';
@@ -22,7 +22,7 @@ export async function passwordMatches(password: string, hash: string): Promise<b
 }
 export type AuthUser = { id: number; username: string; displayName: string; tokenVersion: number; roles: string[]; permissions: string[] };
 @Injectable()
-export class AuthDbService implements OnModuleDestroy {
+export class AuthDbService implements OnModuleDestroy, OnModuleInit {
   private pool?: sql.ConnectionPool;
   private connecting?: Promise<sql.ConnectionPool>;
   async connect(): Promise<sql.ConnectionPool> {
@@ -43,6 +43,30 @@ export class AuthDbService implements OnModuleDestroy {
     return this.connecting;
   }
   async onModuleDestroy() { if (this.connecting) await this.connecting.catch(() => undefined); await this.pool?.close(); }
+  async onModuleInit() {
+    await this.seedPermissions();
+  }
+  private async seedPermissions() {
+    const permissions = [
+      'biostar.import.view', 'biostar.import.upload', 'biostar.import.mapping',
+      'biostar.import.validate', 'biostar.import.confirm', 'biostar.import.cancel',
+      'biostar.import.start', 'biostar.import.report',
+    ];
+    try {
+      const existing = await this.connect().then(pool => pool.request()
+        .query("SELECT Name FROM dbo.AuthPermissions WHERE Name IN ('" + permissions.join("','") + "')"));
+      const have = new Set(existing.recordset.map((row: any) => row.Name));
+      const missing = permissions.filter(p => !have.has(p));
+      if (!missing.length) return;
+      const pool = await this.connect();
+      for (const p of missing) {
+        await pool.request().input('name', sql.NVarChar(200), p)
+          .query("INSERT dbo.AuthPermissions(Name) OUTPUT inserted.Id AS id VALUES(@name)");
+      }
+    } catch {
+      // Tabel AuthPermissions mungkin belum tersedia pada awalnya; abaikan agar startup tidak gagal.
+    }
+  }
   async credentials(username: string) {
     const result = await (await this.connect()).request().input('username', sql.NVarChar(200), username)
       .query('SELECT Id AS id, PasswordHash AS passwordHash, TokenVersion AS tokenVersion FROM dbo.AuthUsers WHERE Username=@username AND IsActive=1').catch(unavailable);

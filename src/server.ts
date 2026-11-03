@@ -6,6 +6,8 @@ import { Request, Response, NextFunction } from 'express';
 import { resolve } from 'node:path';
 import { ApiController } from './api';
 import { AuthModule } from './auth';
+import { BiostarImportController } from './biostar.controller';
+import { biostarService } from './biostar';
 import { DbService } from './db';
 import { PcService } from './pc';
 import { PcRegistryService } from './registry';
@@ -21,7 +23,7 @@ class ErrorFilter implements ExceptionFilter {
     response.status(status).json({ statusCode: status, message, ...(queries.length ? { queries } : {}) });
   }
 }
-@Module({ imports: [AuthModule], controllers: [ApiController], providers: [DbService, PcService, PcRegistryService] })
+@Module({ imports: [AuthModule], controllers: [ApiController, BiostarImportController], providers: [DbService, PcService, PcRegistryService, { provide: 'BiostarService', useValue: biostarService }] })
 export class AppModule { }
 export function validateEnvironment() {
   for (const key of ['JWT_SECRET', 'DB_SERVER', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD', 'AUTH_DB_USER', 'AUTH_DB_PASSWORD']) {

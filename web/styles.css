@@ -269,4 +269,47 @@
 [data-theme="dark"] .anomaly-route-modal{background:var(--surface);color:#e0e4e9}
 [data-theme="dark"] .anomaly-route-target{background:var(--surface-raised)}
 [data-theme="dark"] .anomaly-target-note{background:var(--accent-soft);color:#e0e4e9;border-left-color:var(--accent)}
+/* BioStar: page owns scrolling; wide tables stay inside their panels. */
+.biostar-import-page{height:100%;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:20px;padding:4px 8px 24px 0;scrollbar-gutter:stable;color:var(--text)}
+.biostar-import-page>*{flex-shrink:0;width:100%;margin-inline:auto}
+.workspace .biostar-import-page>.page-heading{align-items:flex-start;flex-wrap:wrap;gap:16px;margin-inline:auto}
+.biostar-import-page .biostar-card{padding:22px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);min-width:0}
+.biostar-import-page .biostar-card>h2{margin:0 0 16px;font-size:17px}
+.biostar-import-page .helper{display:block;font-size:12px;line-height:1.6}
+.biostar-import-page .biostar-form fieldset{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 20px;align-items:end;padding:0;margin:0;border:0;min-width:0}
+.biostar-import-page .biostar-form label{display:grid;gap:8px;min-width:0;font-size:13px}
+.biostar-import-page input[type="file"]{width:100%;min-width:0;background:var(--surface);color:var(--text);padding:8px}
+.biostar-import-page input[type="file"]::file-selector-button{font:inherit;background:var(--accent-soft);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;margin-right:12px;cursor:pointer}
+.biostar-import-page .biostar-form .helper{grid-column:1/-1;grid-row:2}
+.biostar-import-page .biostar-form button{grid-column:2;grid-row:1;min-height:46px}
+.biostar-meta{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr));gap:20px;font-size:13px;line-height:1.5}
+.biostar-meta>div{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.biostar-meta>div>span:first-child{color:var(--muted);font-size:12px}
+.biostar-meta strong{font-weight:600;overflow-wrap:anywhere}
+.biostar-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;margin-top:22px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.biostar-summary>div{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--surface-hover)}
+.biostar-summary span{font-size:12px;color:var(--muted)}
+.biostar-summary strong{font-size:26px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums}
+.biostar-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--border-soft)}
+.biostar-import-page button{white-space:normal}
+.biostar-import-page .table-scroll{width:100%;max-height:400px;overflow:auto;border:1px solid var(--border-soft);border-radius:var(--radius);isolation:isolate}
+.biostar-import-page table{width:100%;min-width:740px;font-size:12px;white-space:normal}
+.biostar-import-page th{background:var(--surface-hover);white-space:nowrap}
+.biostar-import-page td{vertical-align:middle;overflow-wrap:anywhere;max-width:380px}
+.biostar-import-page .biostar-subtable+.biostar-subtable{margin-top:24px}
+.biostar-import-page .status{display:inline-flex;align-items:center;padding:4px 8px;border-radius:var(--radius-sm);font-size:11px;line-height:1.4;white-space:nowrap}
+.biostar-import-page .status.ok{background:var(--success-soft);color:var(--success)}
+.biostar-import-page .status.err{background:var(--danger-soft);color:var(--danger)}
+.biostar-import-page .status.info{background:var(--accent-soft);color:var(--accent)}
+.biostar-import-page .biostar-history{position:fixed;inset:0;margin:auto;width:min(1100px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0}
+.biostar-import-page .biostar-history .table-scroll{max-height:60dvh}
+.biostar-import-page .biostar-confirm{position:fixed;inset:0;margin:auto;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0}
+.biostar-confirm .panel-heading{padding:20px 24px;align-items:center}
+.biostar-confirm .panel-heading h2{margin:6px 0 0;font-size:20px}
+.biostar-confirm .form-body{display:flex;flex-direction:column;gap:18px;padding:24px}
+.biostar-confirm .form-body p{margin:0}
+.biostar-confirm .biostar-meta{grid-template-columns:minmax(0,1fr);padding:16px;background:var(--surface-hover);border:1px solid var(--border-soft);border-radius:var(--radius)}
+@media(max-width:1000px){.biostar-meta{grid-template-columns:repeat(3,minmax(0,1fr))}.biostar-meta>div:first-child{grid-column:1/-1}}
+@media(max-width:700px){.sidebar nav button.biostar-nav{flex-direction:column;gap:6px;overflow-wrap:normal;font-size:9px}}
+@media(max-width:600px){.biostar-import-page{gap:14px;padding-right:2px}.biostar-import-page .biostar-card{padding:16px}.biostar-import-page .biostar-form fieldset{grid-template-columns:minmax(0,1fr)}.biostar-import-page .biostar-form button{grid-column:1;grid-row:3;width:100%}.biostar-meta{grid-template-columns:minmax(0,1fr)}.biostar-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.biostar-summary>div:last-child{grid-column:1/-1}.biostar-actions>button{flex:1 1 100%}.biostar-confirm .form-body{padding:16px}.biostar-confirm .panel-heading{padding:16px}}
 

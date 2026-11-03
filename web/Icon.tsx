@@ -1,4 +1,4 @@
-export type IconName = 'ping' | 'edit' | 'trash' | 'reload' | 'plus' | 'upload' | 'download' | 'search' | 'play' | 'clock' | 'calendar' | 'reset' | 'open';
+export type IconName = 'ping' | 'edit' | 'trash' | 'reload' | 'plus' | 'upload' | 'download' | 'search' | 'play' | 'clock' | 'calendar' | 'reset' | 'open' | 'close' | 'history';
 
 const paths: Record<IconName, string> = {
   ping: 'M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5M19.1 4.9C23 8.8 23 15.2 19.1 19.1M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
@@ -14,6 +14,8 @@ const paths: Record<IconName, string> = {
   calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
   reset: 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-4',
   open: 'M7 17 17 7M8 7h9v9',
+  close: 'M6 6l12 12M6 18 18 6',
+  history: 'M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7M12 7v5l3 2',
 };
 
 /** Ikon dekoratif; nama aksi selalu dibawa lewat title + aria-label pada tombol induk. */
