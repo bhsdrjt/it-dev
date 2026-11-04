@@ -29,6 +29,7 @@
     "three": "^0.187.0"
   },
   "overrides": {
+    "multer": "^2.5.0",
     "@azure/msal-node": "^7.1.1"
   },
   "devDependencies": {
