@@ -38,7 +38,7 @@ type PreviewUser = {
   sourceUsrId: string;
   name: string | null;
   targetUsrId: string;
-  status: 'Tetap' | 'Diganti' | 'Diblokir';
+  status: 'Tetap' | 'Diganti' | 'Diblokir' | 'Dilewati';
   reason: string | null;
   fingerprintCount: number;
   csnCount: number;
@@ -181,11 +181,23 @@ export function BiostarImport({ api }: { api: Api }) {
   const [detail, setDetail] = useState<{ fingerprints: any[]; cards: any[]; relations: any[] } | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const detailDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!detailOpen || !detail || !detailDialog.current) return;
+    const dialog = detailDialog.current;
+    const trigger = document.activeElement;
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, [detailOpen, detail]);
 
   const detailJobId = job?.id;
   const detailJobStatus = job?.status;
   const detailJobRevision = job?.revision;
   useEffect(() => {
+    setDetailOpen(false);
     setDetail(null);
     setDetailBusy(false);
     if (!detailJobId || detailJobStatus !== 'READY') return;
@@ -251,7 +263,7 @@ export function BiostarImport({ api }: { api: Api }) {
     </div>
     {error && <p className="error" role="alert">{error}</p>}
     <section className="biostar-card">
-      <h2>1. Upload paket</h2>
+      <h2>Upload paket</h2>
       <form onSubmit={upload} className="biostar-form">
         <fieldset disabled={busy}>
           <label>Pilih ZIP<input type="file" accept=".zip" onChange={handleFile} disabled={busy} required /></label>
@@ -264,7 +276,7 @@ export function BiostarImport({ api }: { api: Api }) {
     </section>
 
     {job && <section className="biostar-card">
-      <h2>2. Ringkasan paket</h2>
+      <h2>Ringkasan paket</h2>
       <div className="biostar-meta">
         <div><span>Paket</span><strong>{job.packageId}</strong></div>
         <div><span>Target</span><strong>{job.target}</strong></div>
@@ -294,8 +306,9 @@ export function BiostarImport({ api }: { api: Api }) {
     </section>}
 
     {preview && <section className="biostar-card">
-      <h2>3. Preview user</h2>
-      <p className="helper">Revisi {preview.revision}. {preview.changedCount} ID berubah, {preview.unchangedCount} tetap. Konflik kartu memblokir seluruh impor.</p>
+      <h2>Preview user</h2>
+      <p className="helper">Revisi {preview.revision}. {preview.changedCount} ID berubah, {preview.unchangedCount} tetap, {preview.users.filter(u => u.status === 'Dilewati').length} user dilewati. Nama sama persis (termasuk huruf besar/kecil dan spasi) di server tujuan tidak diimpor beserta credential-nya. Kartu bersama tetap diimpor untuk user yang lolos; konflik kartu yang akan diimpor memblokir seluruh impor.</p>
+      {preview.changedCount + preview.unchangedCount === 0 && <p role="status">Tidak ada user baru untuk diimpor.</p>}
       <div className="table-scroll">
         <table>
           <thead>
@@ -305,7 +318,7 @@ export function BiostarImport({ api }: { api: Api }) {
             {preview.users.map(u => <tr key={u.sourceUsrUid}>
               <td className="mono">{u.sourceUsrId}</td>
               <td>{u.name ?? '—'}</td>
-              <td className="mono">{u.targetUsrId}</td>
+              <td className="mono">{u.targetUsrId || '—'}</td>
               <td>{u.status}</td>
               <td>{u.reason ?? '—'}</td>
               <td>{u.fingerprintCount}</td>
@@ -316,18 +329,19 @@ export function BiostarImport({ api }: { api: Api }) {
       </div>
       <div className="biostar-actions">
         {job?.status === 'READY' && <>
-          <button className="primary" disabled={busy} onClick={() => openConfirm(job)}>Setujui perubahan ID dan mapping</button>
+          <button className="primary" disabled={busy || preview.changedCount + preview.unchangedCount === 0} onClick={() => openConfirm(job)}>Setujui perubahan ID dan mapping</button>
           <button className="danger-text" disabled={busy} onClick={doCancel}>Batalkan</button>
         </>}
-        {detail && <button disabled={busy} aria-expanded={detailOpen} aria-controls="biostar-detail" onClick={() => setDetailOpen(!detailOpen)}>
-          {detailOpen ? 'Sembunyikan detail paket' : 'Tampilkan detail paket'}
-        </button>}
+        {detail && <button disabled={busy} aria-haspopup="dialog" aria-controls="biostar-detail" onClick={() => setDetailOpen(true)}>Detail paket</button>}
       </div>
     </section>}
 
-    {detail && <section id="biostar-detail" className="biostar-card" hidden={!detailOpen}>
-      <h2>Detail data paket</h2>
-      <p className="helper">Template sidik jari hanya ditampilkan panjang datanya, bukan isi template.</p>
+    {detail && detailOpen && <dialog id="biostar-detail" ref={detailDialog} className="biostar-detail-modal" aria-labelledby="biostar-detail-title" onCancel={() => setDetailOpen(false)} onClose={() => setDetailOpen(false)}>
+      <div className="panel-heading">
+        <h2 id="biostar-detail-title">Detail data paket</h2>
+        <button type="button" className="icon-button" title="Tutup detail paket" aria-label="Tutup detail paket" onClick={() => setDetailOpen(false)}><Icon name="close" /></button>
+      </div>
+      <div className="biostar-detail-body">
       {detailBusy && <p>Memuat detail…</p>}
       <div className="biostar-subtable">
         <h3>Fingerprint ({detail.fingerprints.length})</h3>
@@ -366,7 +380,8 @@ export function BiostarImport({ api }: { api: Api }) {
           </table>
         </div>
       </div>
-    </section>}
+      </div>
+    </dialog>}
 
     {confirmOpen && confirmJob && <dialog ref={confirmDialog} className="confirm-modal biostar-confirm" aria-labelledby="biostar-confirm-title" onCancel={() => setConfirmOpen(false)} onClose={() => setConfirmOpen(false)}>
       <form onSubmit={event => { event.preventDefault(); void doConfirm(); }}>
@@ -383,7 +398,7 @@ export function BiostarImport({ api }: { api: Api }) {
             <div><span>Paket</span><strong>{confirmJob.packageId}</strong></div>
             <div><span>Target</span><strong>{confirmJob.target}</strong></div>
           </div>
-          <p>{confirmJob.preview!.users.length} user, {confirmJob.preview!.changedCount} ID berubah, {confirmJob.preview!.unchangedCount} tetap.</p>
+          <p>{confirmJob.preview!.changedCount + confirmJob.preview!.unchangedCount} user akan diimpor, {confirmJob.preview!.users.filter(u => u.status === 'Dilewati').length} dilewati. {confirmJob.preview!.changedCount} ID berubah, {confirmJob.preview!.unchangedCount} tetap.</p>
           <p className="helper">Konfirmasi berarti Anda menyetujui target, revisi preview, jumlah ID berubah/tetap, mapping dependensi, jumlah credential, backup, dan maintenance.</p>
           <button className="primary wide" type="submit" disabled={busy}>{busy ? 'Menyetujui…' : 'Ya, setujui impor'}</button>
         </div>

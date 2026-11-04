@@ -406,16 +406,25 @@ test('HTTP login, JWT protection, CRUD, lookup, read, upsert and friendly DB err
     const rows = await request(`/equipment-checks?apiId=${id}`);
     assert.equal(rows.body[0].equipmentName, 'TR-10'); assert.equal(rows.body[0].locationName, 'Lokasi 8');
     let writes = 0;
+    network.checks = async () => assert.fail('Upsert must not GET EquipmentChecks');
+    db.locations = async () => assert.fail('Upsert must not query locations');
     network.request = async (_pc, method, options) => {
       writes++; assert.equal(method, 'POST'); assert.equal(options.timeout, 10000);
-      assert.deepEqual(options.data, { equipmentID: 10, locationID: 8, isGenerateCDN: false });
+      assert.deepEqual(options.data, { equipmentID: 10, locationID: 0, isGenerateCDN: false });
     };
-    const payload = { apiId: id, equipmentID: 10, locationID: 8, isGenerateCDN: false };
-    assert.equal((await request('/equipment-checks/upsert', 'POST', { ...payload, locationID: 999 })).status, 400);
-    assert.equal((await request('/equipment-checks/upsert', 'POST', { ...payload, equipmentID: 999 })).status, 400);
+    const payload = { apiId: id, equipmentID: 10, isGenerateCDN: false };
+    for (const equipmentID of [999, null, '10', -1, 1.5]) {
+      assert.equal((await request('/equipment-checks/upsert', 'POST', { ...payload, equipmentID })).status, 400);
+    }
     assert.equal((await request('/equipment-checks/upsert', 'POST', { ...payload, isGenerateCDN: 'false' })).status, 400);
     assert.equal(writes, 0);
-    assert.equal((await request('/equipment-checks/upsert', 'POST', payload)).status, 201); assert.equal(writes, 1);
+    for (const body of [payload, { ...payload, locationID: 0 }, { ...payload, locationID: 999 }]) {
+      const response = await request('/equipment-checks/upsert', 'POST', body);
+      assert.equal(response.status, 201);
+      assert.match(response.body.message, /lokasi 0/);
+    }
+    assert.equal(writes, 3);
+    db.locations = async () => locations;
     probes = [];
     network.checks = async (_pc, params) => { probes.push(params.locationID); throw new (require('@nestjs/common').BadGatewayException)('PC Updated PC (192.0.2.10) connection error'); };
     assert.equal((await request(`/equipment-checks/location?apiId=${id}&equipmentId=10`)).status, 502);

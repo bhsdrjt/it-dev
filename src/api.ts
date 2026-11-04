@@ -241,12 +241,10 @@ export class ApiController {
     const data = object(body);
     const pc = await this.registry.get(text(data.apiId, 'ID API'));
     const equipmentID = integer(data.equipmentID, 'EquipmentID');
-    const locationID = integer(data.locationID, 'LocationID');
+    const locationID = 0;
     if (typeof data.isGenerateCDN !== 'boolean') throw new BadRequestException(`${this.pc.label(pc)}: isGenerateCDN harus boolean.`);
-    if (!pc.locationIDs.includes(locationID)) throw new BadRequestException(`${this.pc.label(pc)}: LocationID ${locationID} tidak termasuk lokasi API.`);
     await this.pc.requireTcp(pc);
     if (!(await this.reference(this.pc.label(pc), () => this.db.equipment(equipmentID))).length) throw new BadRequestException(`${this.pc.label(pc)}: EquipmentID ${equipmentID} tidak terdaftar.`);
-    if (!(await this.reference(this.pc.label(pc), () => this.db.locations())).some(location => location.LocationID === locationID)) throw new BadRequestException(`${this.pc.label(pc)}: LocationID ${locationID} bukan lokasi aktif type 7.`);
     await this.pc.request(pc, 'POST', { data: { equipmentID, locationID, isGenerateCDN: data.isGenerateCDN }, timeout: 10000 });
     return { message: `${this.pc.label(pc)}: konfigurasi equipment ${equipmentID}, lokasi ${locationID}, berhasil dikirim.` };
   }

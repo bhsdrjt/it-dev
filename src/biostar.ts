@@ -268,7 +268,7 @@ export type ImportUser = {
   sourceUsrUid: string;
   sourceUsrId: string;
   targetUsrId: string;
-  status: 'Tetap' | 'Diganti' | 'Diblokir';
+  status: 'Tetap' | 'Diganti' | 'Diblokir' | 'Dilewati';
   fingerprintCount: number;
   csnCount: number;
   // Profil T_USR (diisi dari CSV bila tersisa, null jika tidak ada -> default DB).
@@ -366,7 +366,7 @@ export type PreviewUser = {
   sourceUsrId: string;
   name: string | null;
   targetUsrId: string;
-  status: 'Tetap' | 'Diganti' | 'Diblokir';
+  status: 'Tetap' | 'Diganti' | 'Diblokir' | 'Dilewati';
   reason: string | null;
   fingerprintCount: number;
   csnCount: number;
@@ -379,6 +379,26 @@ export type ImportPreview = {
   unchangedCount: number;
   credentialCount: { fingerprint: number; card: number; relation: number };
 };
+
+function skipExistingNames(parsed: ParsedPackage, names: Set<string>): void {
+  // ponytail: exact string match, including case and spaces; normalize here only if matching rules change.
+  const skipped = new Set(parsed.users.filter(u => u.nm !== null && u.nm !== '' && names.has(u.nm)).map(u => u.sourceUsrUid));
+  const removedCards = new Set(parsed.relations.filter(r => skipped.has(r.sourceUsrUid)).map(r => r.sourceCrdUid));
+  parsed.users = parsed.users.filter(u => !skipped.has(u.sourceUsrUid));
+  parsed.fingerprints = parsed.fingerprints.filter(f => !skipped.has(f.sourceUsrUid));
+  parsed.relations = parsed.relations.filter(r => !skipped.has(r.sourceUsrUid));
+  const retainedCards = new Set(parsed.relations.map(r => r.sourceCrdUid));
+  parsed.cards = parsed.cards.filter(c => !removedCards.has(c.sourceCrdUid) || retainedCards.has(c.sourceCrdUid));
+  for (const u of parsed.preview.users) {
+    if (!skipped.has(u.sourceUsrUid)) continue;
+    u.status = 'Dilewati';
+    u.targetUsrId = '';
+    u.reason = 'Nama sama persis sudah ada di server tujuan; user dan credential tidak diimpor.';
+  }
+  parsed.preview.changedCount = parsed.preview.users.filter(u => u.status === 'Diganti').length;
+  parsed.preview.unchangedCount = parsed.preview.users.filter(u => u.status === 'Tetap').length;
+  parsed.preview.credentialCount = { fingerprint: parsed.fingerprints.length, card: parsed.cards.length, relation: parsed.relations.length };
+}
 
 function sha256(data: Buffer): string { return createHash('sha256').update(data).digest('hex'); }
 
@@ -626,10 +646,11 @@ export class BiostarService {
       }
 
       const pool = await this.biostarConnect();
-      const { usrIds } = await this.fetchExistingIds(pool);
-      const plan = planUserIds(users.map(u => u.sourceUsrId), usrIds);
+      const { usrIds, names } = await this.fetchExistingIds(pool);
+      const eligible = users.filter(u => u.nm === null || u.nm === '' || !names.has(u.nm));
+      const plan = planUserIds(eligible.map(u => u.sourceUsrId), usrIds);
       const previewUsers: PreviewUser[] = users.map(u => {
-        const target = plan.get(u.sourceUsrId)!;
+        const target = plan.get(u.sourceUsrId) ?? u.sourceUsrId;
         return {
           sourceUsrUid: u.sourceUsrUid,
           sourceUsrId: u.sourceUsrId,
@@ -677,6 +698,7 @@ export class BiostarService {
         },
       };
 
+      skipExistingNames(parsed, names);
       job.parsed = parsed;
       job.summary = parsed.summary;
       job.preview = parsed.preview;
@@ -697,6 +719,7 @@ export class BiostarService {
   async confirm(jobId: string, revision: number): Promise<ImportJob> {
     const job = this.getJob(jobId);
     if (!job.preview || job.preview.revision !== revision) throw new BadRequestException('Revisi preview tidak cocok. Buat preview ulang.');
+    if (!job.parsed?.users.length) throw new BadRequestException('Tidak ada user baru untuk diimpor; semua nama sudah ada di server tujuan.');
     this.lockedTargets.add(job.target);
     job.revision = revision;
     job.confirmError = null;
@@ -714,14 +737,19 @@ export class BiostarService {
     return job;
   }
 
-  private async fetchExistingIds(pool: sql.ConnectionPool): Promise<{ usrIds: Set<string>; crdCsns: Set<string> }> {
+  private async fetchExistingIds(pool: sql.ConnectionPool | sql.Transaction): Promise<{ usrIds: Set<string>; crdCsns: Set<string>; names: Set<string> }> {
     const usrIds = new Set<string>();
     const crdCsns = new Set<string>();
-    const usrRes = await pool.request().query('SELECT USRID FROM dbo.T_USR WHERE USRID IS NOT NULL');
-    for (const row of usrRes.recordset) if (row.USRID != null) usrIds.add(String(row.USRID));
+    const names = new Set<string>();
+    const lock = pool instanceof sql.Transaction ? ' WITH (UPDLOCK, HOLDLOCK)' : '';
+    const usrRes = await pool.request().query(`SELECT USRID, NM FROM dbo.T_USR${lock}`);
+    for (const row of usrRes.recordset) {
+      if (row.USRID != null) usrIds.add(String(row.USRID));
+      if (row.NM != null && row.NM !== '') names.add(String(row.NM));
+    }
     const crdRes = await pool.request().query("SELECT CRDCSN FROM dbo.T_CRD WHERE CRDCSN IS NOT NULL AND CRDCSN <> ''");
     for (const row of crdRes.recordset) if (row.CRDCSN != null) crdCsns.add(String(row.CRDCSN));
-    return { usrIds, crdCsns };
+    return { usrIds, crdCsns, names };
   }
 
   private mssqlTypeFor(col: string): sql.ISqlType {
@@ -740,8 +768,10 @@ export class BiostarService {
     try {
       await new sql.Request(tx).query('SET XACT_ABORT ON');
 
+      const { usrIds, crdCsns, names } = await this.fetchExistingIds(tx);
+      skipExistingNames(job.parsed, names);
       const { users, fingerprints, cards, relations } = job.parsed;
-      const { usrIds, crdCsns } = await this.fetchExistingIds(pool);
+      if (!users.length) throw new BadRequestException('Tidak ada user baru untuk diimpor; semua nama sudah ada di server tujuan.');
 
       // Cek konflik USRID seluruh paket sebelum insert apa-apa (PRD §11).
       const planTargets = users.map(u => u.targetUsrId);

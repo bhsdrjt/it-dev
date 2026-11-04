@@ -18,6 +18,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
     window.confirm = () => { throw Error('Native confirmation must not be used'); };
     let answerConfirmation = () => true;
     let requestDelay = 0;
+    let upsertFails = false;
     let copyStatus = 200;
     let replayFails = false;
     let releaseFails = false;
@@ -26,8 +27,9 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
     let pairTimesOut = false;
     window.fetch = async (path, options = {}) => {
       calls.push({ path, body: options.body && JSON.parse(options.body) });
-      if (path === '/auth/me') return { ok: true, json: async () => ({ userId: 1, username: 'operator', displayName: 'Operator', permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.restore', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view', 'coal.view', 'coal.update', 'coal.delete', 'coal.import', 'activity.view'] }) };
+      if (path === '/auth/me') return { ok: true, json: async () => ({ userId: 1, username: 'operator', displayName: 'Operator', roles: ['operator', 'viewer'], permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.restore', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view', 'coal.view', 'coal.update', 'coal.delete', 'coal.import', 'activity.view'] }) };
       if (requestDelay) await new Promise(resolve => setTimeout(resolve, requestDelay));
+      if (path === '/equipment-checks/upsert' && upsertFails) return { ok: false, status: 502, json: async () => ({ message: 'API gagal mengonfirmasi penyimpanan.' }) };
       if (path.startsWith('/anomalies?')) {
         const query = new URL(path, location.origin).searchParams;
         const all = [
@@ -81,7 +83,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
           { Transaksi: 'RawDumping', CTFinalTonnageID: 4, CoalDeliveryNumber: 'OTHER', dtDeletedAt: null },
         ], activities: [{ trans: 'Net Reader', ReaderLocationName: 'MT TEST', CoalDeliveryNumber: null, flTonnage: 0, dtTimeCollected: '2026-07-13T14:00:00.000Z' }, { trans: 'Tol Gate', ReaderLocationName: 'TOLL TEST', CoalDeliveryNumber: number }] }) };
       }
-      const data = path === '/apis' ? pcs : path === '/equipments' ? [{ EquipmentID: 10, strTruckCN: 'TR-10' }, { EquipmentID: 11, strTruckCN: 'TR-11' }, { EquipmentID: 99, strTruckCN: 'DELETED' }] : path === '/locations' ? [7, 8].map(id => ({ LocationID: id, strLocationName: 'Lokasi ' + id })) : path.startsWith('/equipment-checks/location?') ? { locationID: path.includes('apiId=two') ? 8 : 7, locationName: 'Lokasi ditemukan', checkedLocationIDs: [7], message: 'Lookup selesai' } : path === '/equipment-checks/upsert' ? { message: 'Tersimpan' } : path === '/coal-calories' ? [
+      const data = path === '/apis' ? pcs : path === '/equipments' ? [{ EquipmentID: 10, strTruckCN: 'TR-10' }, { EquipmentID: 11, strTruckCN: 'TR-11' }, { EquipmentID: 99, strTruckCN: 'DELETED' }, ...Array.from({ length: 30 }, (_, i) => ({ EquipmentID: 200 + i, strTruckCN: 'SCROLL-' + i }))] : path === '/locations' ? [7, 8].map(id => ({ LocationID: id, strLocationName: 'Lokasi ' + id })) : path.startsWith('/equipment-checks/location?') ? { locationID: path.includes('apiId=two') ? 8 : 7, locationName: 'Lokasi ditemukan', checkedLocationIDs: [7], message: 'Lookup selesai' } : path === '/equipment-checks/upsert' ? { message: 'Tersimpan' } : path === '/coal-calories' ? [
         { CoalQualityAGMID: 1, CoalQualityID: 11, CoalQualityName: 'SEAM B', Coalcalory: 5000, dtUpdatedAt: '2026-10-01T08:00:00.000Z' },
         { CoalQualityAGMID: 2, CoalQualityID: 12, CoalQualityName: 'SEAM A', Coalcalory: null, dtUpdatedAt: '2026-10-02T08:00:00.000Z' },
         { CoalQualityAGMID: 3, CoalQualityID: 13, CoalQualityName: 'SEAM C', Coalcalory: 6300, dtUpdatedAt: '2026-10-03T08:00:00.000Z' },
@@ -144,7 +146,12 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         const checkTopbarButtons = () => {
           const themeBox = themeToggle.getBoundingClientRect();
           const logoutBox = document.querySelector('[aria-label="Keluar"]').getBoundingClientRect();
-          check(themeBox.width === 36 && themeBox.height === 36 && logoutBox.width === 36 && logoutBox.height === 36 && themeBox.top === logoutBox.top, 'theme and logout buttons align at exactly 36 by 36 pixels');
+          check(themeBox.width === 36 && themeBox.height === 36 && logoutBox.width === 36 && logoutBox.height === 36, 'theme and logout buttons remain 36 by 36 pixels');
+          check(themeToggle.closest('.sidebar-bottom') && themeBox.top > innerHeight / 2 && !document.querySelector('.topbar .theme-toggle'), 'theme control moves to bottom left sidebar');
+          const user = document.querySelector('.topbar .signed-in-user');
+          check(user.querySelector('strong').textContent === 'Operator' && user.querySelector('span').textContent === 'operator, viewer', 'header displays logged in name and roles');
+          check(parseFloat(getComputedStyle(user.querySelector('strong')).fontSize) > parseFloat(getComputedStyle(user.querySelector('span')).fontSize), 'name is larger than roles');
+          check(user.getBoundingClientRect().right <= logoutBox.left, 'user identity stays beside logout without overlap');
         };
         checkTopbarButtons();
         if (themeToggle.getAttribute('aria-pressed') === 'true') { themeToggle.click(); await tick(); }
@@ -158,19 +165,69 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(getComputedStyle(document.querySelector('[aria-label="Keluar"]')).color !== 'rgb(229, 233, 238)' && getComputedStyle(document.querySelector('[aria-label="Keluar"]')).color !== 'rgb(255, 255, 255)', 'logout icon color stays visible on light topbar');
         const truck = document.querySelector('#truck-picker');
         const pc = document.querySelector('.configuration select');
-        check(document.querySelectorAll('.configuration select').length === 2, 'no duplicate equipment dropdown');
+        document.querySelector('.configuration .combobox-toggle').click(); await tick();
+        const truckList = document.querySelector('.configuration [role="listbox"]');
+        check(truckList.matches(':popover-open') && truckList.children.length === 33, 'truck browser opens all options, not only first eight');
+        check(truckList.scrollHeight > truckList.clientHeight, 'truck list has its own scroll');
+        truckList.scrollTop = truckList.scrollHeight; await tick();
+        const lastTruck = truckList.lastElementChild;
+        const lastRect = lastTruck.getBoundingClientRect();
+        check(lastRect.bottom <= innerHeight && document.elementFromPoint(lastRect.left + 10, lastRect.top + 10) === lastTruck, 'last truck visible and not clipped by panel');
+        lastTruck.click(); await tick();
+        check(truck.value === 'SCROLL-29 · #229' && !truckList.matches(':popover-open'), 'scrolled truck selectable without typing');
+        change(truck, 'TR-10'); await tick();
+        truck.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); await tick();
+        check(truck.getAttribute('aria-activedescendant') === truckList.firstElementChild.id, 'keyboard selection announces active truck');
+        truck.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await tick();
+        check(truck.value === 'TR-10 · #10', 'keyboard selects filtered truck');
+        check(!document.querySelector('.summary').textContent.includes('Lokasi referensi') && document.querySelectorAll('.summary > div').length === 3, 'equipment summary omits reference location total');
+        pcs.push({ id: 'offline', apiName: 'API Offline', ipAPI: '192.0.2.3', locationIDs: [], online: false });
+        requestDelay = 350;
+        const reload = document.querySelector('.registry [aria-label="Muat ulang"]');
+        const reloadWidth = reload.getBoundingClientRect().width;
+        reload.click(); await tick();
+        check(reload.getAttribute('aria-busy') === 'true' && getComputedStyle(reload.querySelector('svg')).display === 'none', 'reload displays spinner without duplicate icon');
+        check(getComputedStyle(reload, '::before').marginRight === '0px' && reload.getBoundingClientRect().width === reloadWidth, 'reload spinner stays centered without resizing button');
+        await new Promise(resolve => setTimeout(resolve, 400)); await tick();
+        requestDelay = 0;
+        check(![...pc.options].some(option => option.value === 'offline'), 'offline API excluded from target dropdown');
+        check(button('API Offline').disabled, 'offline API cannot be selected from registry');
+        pcs.pop();
+        reload.click(); await tick();
+        check(document.querySelectorAll('.configuration select').length === 1 && !document.querySelector('.lookup-box'), 'only API dropdown remains; no location picker or lookup');
         change(truck, 'TR-10 · #10'); await tick();
         check(document.querySelector('#truck-selection').textContent.includes('#10'), 'truck resolves equipment ID');
         change(pc, 'one'); await tick();
         check(document.querySelector('.configuration select:last-of-type'), 'configuration available');
-        check(calls.some(row => row.path.includes('apiId=one&equipmentId=10')), 'lookup uses selected truck');
+        check(!calls.some(row => row.path.startsWith('/equipment-checks')), 'truck and API selection require no EquipmentChecks GET');
         change(pc, 'two'); await tick();
         check(truck.value === 'TR-10 · #10', 'truck stays selected across APIs');
-        check(calls.some(row => row.path.includes('apiId=two&equipmentId=10')), 'lookup follows changed API');
+        check(!calls.some(row => row.path.startsWith('/equipment-checks')), 'changing API does not trigger lookup');
         check(!button('Kirim konfigurasi').disabled, 'configuration ready');
+        pcs[1].online = false;
+        reload.click(); await tick();
+        check(pc.value === '' && button('Kirim konfigurasi').disabled, 'selected target going offline clears displayed selection and blocks send');
+        pcs[1].online = true;
+        reload.click(); await tick();
+        requestDelay = 350;
         button('Kirim konfigurasi').click(); await tick();
+        const pending = document.querySelector('.configuration [role="status"][aria-busy="true"]');
+        check(pending && pending.textContent.includes('menunggu respons') && button('Mengirim konfigurasi').disabled, 'upsert shows pending notice and blocks duplicate sends');
+        check(getComputedStyle(pending, '::before').animationName === 'process-spin', 'upsert pending indicator animates');
+        check(!pending.textContent.includes('Berhasil'), 'success waits for API response');
+        await new Promise(resolve => setTimeout(resolve, 400)); await tick();
+        requestDelay = 0;
         const sent = calls.find(row => row.path === '/equipment-checks/upsert');
-        check(sent.body.equipmentID === 10 && sent.body.apiId === 'two' && sent.body.locationID === 8, 'upsert shares truck and API selection');
+        check(sent.body.equipmentID === 10 && sent.body.apiId === 'two' && sent.body.locationID === 0, 'upsert shares truck and API selection');
+        const notice = document.querySelector('.configuration .success');
+        check(notice && notice.textContent.includes('Berhasil') && notice.textContent.includes('TR-10') && notice.textContent.includes('API Two') && notice.textContent.includes('Tersimpan'), 'upsert success includes truck, target and response');
+        upsertFails = true;
+        button('Kirim konfigurasi').click(); await tick();
+        check(!document.querySelector('.configuration .success') && document.querySelector('.configuration [role="alert"]').textContent.includes('gagal mengonfirmasi'), 'failed retry removes old success and shows error');
+        upsertFails = false;
+        button('Kirim konfigurasi').click(); await tick();
+        document.querySelector('.configuration [aria-label="Tutup notifikasi"]').click(); await tick();
+        check(!document.querySelector('.configuration .success'), 'success notification can be dismissed');
         change(truck, 'unknown'); await tick();
         check(button('Kirim konfigurasi').disabled, 'invalid truck cannot reuse stale ID');
         change(truck, '11'); await tick();
@@ -188,7 +245,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         button('Activity log').click(); await tick();
         check(!document.querySelector('.activity-page').hidden && document.querySelector('.equipment-page:not(.activity-page)').hidden, 'activity opens standalone page');
         check(!document.querySelector('.equipment-page:not(.activity-page) .activity') && document.querySelector('.sidebar [aria-current="page"]').textContent.includes('Activity log'), 'global log removed from equipment and available in sidebar');
-        check(document.querySelector('[role="log"]').textContent.includes('Lookup') && document.querySelector('.topbar-context').textContent.includes('Activity log'), 'global log retains session entries and page context');
+        check(document.querySelector('[role="log"]').textContent.includes('Tersimpan') && document.querySelector('.topbar-context').textContent.includes('Activity log'), 'global log retains session entries and page context');
         const beforeTransactions = calls.length;
         button('Analisa transaksi').click(); await tick();
         check(calls.length === beforeTransactions, 'transaction opening waits for explicit submit; hidden pages do not fetch');
@@ -202,6 +259,15 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         change(cdn, 'AF260080419'); await tick();
         document.querySelector('.transaction-search').requestSubmit(); await tick();
         check(document.querySelector('.transaction-summary').textContent.includes('AF260080419'), 'CDN results loaded');
+        const checkSubmenu = root => {
+          const active = root.querySelector('.view-tabs button[aria-pressed="true"]');
+          const style = getComputedStyle(active);
+          check(style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderBottomWidth === '2px' && style.borderRadius === '0px' && style.minHeight === '44px', 'submenu matches access underline tabs');
+        };
+        checkSubmenu(document.querySelector('.transaction-workspace'));
+        themeToggle.click(); await tick();
+        checkSubmenu(document.querySelector('.transaction-workspace'));
+        themeToggle.click(); await tick();
         check(document.querySelector('.transaction-timeline').textContent.includes('2026-07-13 13:36:29.000'), 'database time not shifted');
         check(document.querySelector('.transaction-timeline h3').textContent.trim() === 'Kirim', 'ID is not placed in card title');
         check(document.querySelector('.transaction-timeline .transaction-meta').textContent.includes('ID 1'), 'Kirim card exposes CTFinalTonnageID without opening detail');
@@ -496,6 +562,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         };
         checkHistoryDetailPosition();
         check(history.querySelectorAll('.transaction-timeline li').length === 1 && !history.querySelector('.transaction-timeline').textContent.includes('TerimaRaw'), 'Kirim and Terima exclude raw rows');
+        checkSubmenu(history);
         check(![...history.querySelectorAll('.view-tabs button')].some(node => node.textContent.includes('TerimaRaw')), 'raw tab removed from truck timeline');
         check(!history.textContent.includes('ID 72'), 'raw row is not rendered in truck timeline');
         checkHistoryDetailPosition();
@@ -543,7 +610,15 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(!document.querySelector('.anomaly-view').hidden && document.querySelector('.sidebar [aria-current="page"]').textContent.includes('Monitoring transaksi'), 'anomaly dashboard opens from sidebar');
         check(calls.some(row => row.path.startsWith('/anomalies?start=')), 'anomaly dashboard loads findings from endpoint');
         check(document.querySelectorAll('.anomaly-table tbody tr').length === 2, 'anomaly table renders endpoint findings');
-        check(document.querySelector('.anomaly-kpi.critical strong').textContent === '01' && document.querySelector('.anomaly-kpi.warning strong').textContent === '01', 'anomaly KPI reflects critical and warning findings');
+        check(document.querySelector('.anomaly-kpi.critical dd').textContent === '1' && document.querySelector('.anomaly-kpi.warning dd').textContent === '1', 'anomaly summary shows actual counts without zero padding');
+        const metrics = document.querySelector('.anomaly-kpis');
+        check(metrics.querySelectorAll('dl').length === 5 && !metrics.querySelector('.panel, small'), 'anomaly summary uses flat definition list without repeated cards or captions');
+        check(metrics.firstElementChild.classList.contains('total'), 'total findings leads summary');
+        for (const metric of metrics.children) {
+          const rect = metric.getBoundingClientRect();
+          check(rect.left >= 0 && rect.right <= innerWidth, 'summary fits viewport');
+          check(getComputedStyle(metric).backgroundColor === 'rgba(0, 0, 0, 0)', 'summary metrics have no pastel card backgrounds');
+        }
         check(document.querySelector('.anomaly-table').textContent.includes('Kirim tanpa pasangan 7 hari') && document.querySelector('.anomaly-table').textContent.includes('LoadingLocation Kirim kosong'), 'anomaly table shows both finding codes');
         check(document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight, 'anomaly page fits viewport without page scroll');
         const anomalyCalls = calls.length;

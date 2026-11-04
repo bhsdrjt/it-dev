@@ -11,7 +11,14 @@ for (const admin of [false, true]) test(`audit browser admin=${admin}`, { skip: 
   const script = `
     sessionStorage.setItem('token', 'fixture-only');
     let calls = 0;
+    let holdAudit = true;
+    let releaseAudit;
+    let failAudit = false;
     window.fetch = async path => {
+      if (path.startsWith('/auth/admin/audit?')) {
+        if (holdAudit) await new Promise(resolve => { releaseAudit = resolve; });
+        if (failAudit) return { ok: false, status: 503, json: async () => ({ message: 'Fixture audit unavailable' }) };
+      }
       let data = [];
       if (path === '/auth/me') data = { username: 'fixture', roles: ${JSON.stringify(admin ? ['admin'] : [])}, permissions: ['access.manage'] };
       if (path === '/auth/admin/users') data = { users: [], userRoles: [] };
@@ -28,7 +35,16 @@ for (const admin of [false, true]) test(`audit browser admin=${admin}`, { skip: 
       if (${admin}) {
         menu.click(); await tick();
         const page = document.querySelector('.audit-page');
-        check(page.textContent.includes('fixture-operation'), 'audit loaded');
+        check(page.querySelectorAll('.anomaly-skeleton .skeleton-row').length === 6, 'initial audit load shows shared skeleton');
+        check(!page.querySelector('table') && page.querySelector('.audit-table').getAttribute('aria-busy') === 'true', 'loading hides audit rows');
+        check(page.scrollWidth <= page.clientWidth + 1, 'audit skeleton fits viewport');
+        holdAudit = false; releaseAudit(); await tick();
+        check(!page.querySelector('.anomaly-skeleton') && page.textContent.includes('fixture-operation'), 'audit data replaces skeleton');
+        const username = page.querySelector('input[name="user"]');
+        username.focus();
+        const field = username.getBoundingClientRect();
+        const bounds = page.getBoundingClientRect();
+        check(field.left - bounds.left >= 6 && bounds.right - field.right >= 6, 'username focus ring has clearance from scroll container edges');
         check(page.querySelectorAll('tbody tr').length === 1, 'row rendered');
         check([...page.querySelectorAll('th')].map(n => n.textContent).join('|') === 'User|Aktivitas|Target|Hasil|Waktu (lokal)', 'human table columns');
         const cells = page.querySelectorAll('tbody td');
@@ -46,8 +62,16 @@ for (const admin of [false, true]) test(`audit browser admin=${admin}`, { skip: 
         check(page.scrollWidth <= page.clientWidth + 1, 'page no horizontal overflow');
         check(page.querySelector('.audit-table').scrollWidth > page.querySelector('.audit-table').clientWidth, 'table owns horizontal scroll');
         check([...page.querySelectorAll('button')].find(n => n.textContent === 'Berikutnya').disabled, 'last page disabled');
-        [...page.querySelectorAll('button')].find(n => n.textContent === 'Muat ulang').click(); await tick();
-        check(calls === 2, 'refresh reads again');
+        const reload = page.querySelector('button[aria-label="Muat ulang"]');
+        check(reload.classList.contains('icon-button') && !reload.textContent.trim() && reload.querySelector('svg'), 'audit refresh uses shared icon button');
+        holdAudit = true;
+        reload.click(); await tick();
+        check(page.querySelector('.anomaly-skeleton') && reload.disabled && !page.querySelector('table'), 'audit refresh shows skeleton without stale rows');
+        holdAudit = false; releaseAudit(); await tick();
+        check(calls === 2 && !page.querySelector('.anomaly-skeleton'), 'refresh reads again and clears skeleton');
+        failAudit = true;
+        reload.click(); await tick();
+        check(!page.querySelector('.anomaly-skeleton') && page.querySelector('[role="alert"]').textContent.includes('Fixture audit unavailable'), 'failed audit load replaces skeleton with error');
       } else check(calls === 0, 'restricted user never fetches audit');
       document.body.dataset.testResult = 'passed';
     } catch(e) { document.body.dataset.testResult = 'failed: ' + e.message; } });

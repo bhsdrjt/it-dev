@@ -236,32 +236,27 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
       <button type="button" className="anomaly-reset" title="Reset filter" aria-label="Reset filter" onClick={resetFilters}><Icon name="reset" /></button>
     </section>
 
-    <section className="anomaly-kpis" aria-label="Ringkasan anomali">
-      <article className="panel anomaly-kpi critical">
-        <span>Kritis</span>
-        <strong>{String(stats.critical).padStart(2, '0')}</strong>
-        <small>Pasangan salah, data hilang, atau waktu terbalik</small>
-      </article>
-      <article className="panel anomaly-kpi warning">
-        <span>Warning</span>
-        <strong>{String(stats.warning).padStart(2, '0')}</strong>
-        <small>Perlu verifikasi operator</small>
-      </article>
-      <article className="panel anomaly-kpi neutral">
-        <span>Total temuan</span>
-        <strong>{String(filtered.length).padStart(2, '0')}</strong>
-        <small>Dalam filter aktif</small>
-      </article>
-      <article className="panel anomaly-kpi neutral">
-        <span>SK terdampak</span>
-        <strong>{String(stats.sku).padStart(2, '0')}</strong>
-        <small>Dengan temuan</small>
-      </article>
-      <article className="panel anomaly-kpi neutral">
-        <span>Truck terdampak</span>
-        <strong>{String(stats.truck).padStart(2, '0')}</strong>
-        <small>Dengan temuan</small>
-      </article>
+    <section className="anomaly-kpis" aria-label="Ringkasan anomali" aria-busy={loading}>
+      <dl className="anomaly-kpi total">
+        <dt>Total temuan</dt>
+        <dd>{loading || error ? '—' : filtered.length.toLocaleString('id-ID')}</dd>
+      </dl>
+      <dl className="anomaly-kpi critical">
+        <dt>Kritis</dt>
+        <dd>{loading || error ? '—' : stats.critical.toLocaleString('id-ID')}</dd>
+      </dl>
+      <dl className="anomaly-kpi warning">
+        <dt>Warning</dt>
+        <dd>{loading || error ? '—' : stats.warning.toLocaleString('id-ID')}</dd>
+      </dl>
+      <dl className="anomaly-kpi impact">
+        <dt>SK terdampak</dt>
+        <dd>{loading || error ? '—' : stats.sku.toLocaleString('id-ID')}</dd>
+      </dl>
+      <dl className="anomaly-kpi">
+        <dt>Truck terdampak</dt>
+        <dd>{loading || error ? '—' : stats.truck.toLocaleString('id-ID')}</dd>
+      </dl>
     </section>
 
     {loading ? (
@@ -292,12 +287,12 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
         </div>
       </div>
     </section>
-    ) : (
+    ) : error ? <div className="error-banner" role="alert"><span>{error}</span><button type="button" onClick={() => setNow(Date.now())}>Coba lagi</button></div> : (
     <>
-      <div className="anomaly-grid">
+      {filtered.length > 0 && <div className="anomaly-grid">
         <section className="panel anomaly-panel anomaly-trend" aria-labelledby="anomaly-trend-title">
           <div className="panel-heading">
-            <div><span className="section-index">TREN</span><h2 id="anomaly-trend-title">Anomali per hari</h2></div>
+            <div><h2 id="anomaly-trend-title">Tren temuan</h2></div>
             <span className="small-tag">7 HARI TERAKHIR</span>
           </div>
           <div className="anomaly-trend-body">
@@ -323,7 +318,7 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
 
         <section className="panel anomaly-panel" aria-labelledby="anomaly-codes-title">
           <div className="panel-heading">
-            <div><span className="section-index">KODE</span><h2 id="anomaly-codes-title">Paling sering</h2></div>
+            <div><h2 id="anomaly-codes-title">Kode paling sering</h2></div>
             <span className="small-tag">TOP 5</span>
           </div>
           {topCodes.length ? <ul className="anomaly-code-list">
@@ -336,12 +331,12 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
             </li>)}
           </ul> : <div className="empty compact"><h3>Tidak ada kode</h3><p>Ubah filter untuk melihat temuan lain.</p></div>}
         </section>
-      </div>
+      </div>}
 
-      <div className="anomaly-grid anomaly-main-grid">
+      <div className={`anomaly-grid anomaly-main-grid${filtered.length ? '' : ' is-empty'}`}>
         <section className="panel anomaly-panel anomaly-table-panel" aria-labelledby="anomaly-table-title">
           <div className="panel-heading">
-            <div><span className="section-index">DAFTAR TEMUAN</span><h2 id="anomaly-table-title">Anomali <span className="count">{filtered.length}</span></h2></div>
+            <div><h2 id="anomaly-table-title">Daftar temuan <span className="count">{filtered.length}</span></h2></div>
             <span className="helper" hidden={!hasRoutes}>Buka analisa untuk memeriksa bukti</span>
           </div>
           {filtered.length ? <div className="table-scroll">
@@ -371,18 +366,18 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
                 </tr>)}
               </tbody>
             </table>
-          </div> : <div className="empty compact">
-            <span className="empty-number">00</span>
-            <h3>Tidak ada anomali pada filter ini</h3>
-            <p>Longgarkan rentang waktu atau hapus filter truck/SK.</p>
+          </div> : <div className="anomaly-empty">
+            <h3>Tidak ada temuan pada filter ini</h3>
+            <p>Periode {range === '24h' ? '24 jam terakhir' : range === '7d' ? '7 hari terakhir' : 'bulan berjalan'}. Ubah rentang atau filter untuk memeriksa transaksi lain.</p>
+            <button type="button" onClick={resetFilters}>Reset filter</button>
           </div>}
           <footer className="panel-footer">{filtered.length} temuan ditampilkan</footer>
         </section>
 
         <aside className="anomaly-side">
-          <section className="panel anomaly-panel" aria-labelledby="anomaly-trucks-title">
+          {topTrucks.length > 0 && <section className="panel anomaly-panel" aria-labelledby="anomaly-trucks-title">
             <div className="panel-heading">
-              <div><span className="section-index">TRUCK</span><h2 id="anomaly-trucks-title">Paling terdampak</h2></div>
+              <div><h2 id="anomaly-trucks-title">Truck paling terdampak</h2></div>
               <span className="small-tag">TOP 5</span>
             </div>
             {topTrucks.length ? <ul className="anomaly-truck-list">
@@ -394,18 +389,16 @@ export function AnomalyDashboard({ api, onOpenTransaction, onOpenTruckHistory }:
                 <div className="anomaly-code-bar"><span style={{ width: `${Math.round((item.total / maxTruck) * 100)}%` }} /></div>
               </li>)}
             </ul> : <div className="empty compact"><h3>Belum ada truck</h3><p>Filter saat ini tidak menyertakan truck.</p></div>}
-          </section>
+          </section>}
 
-          <section className="panel anomaly-panel anomaly-help" aria-labelledby="anomaly-help-title">
-            <div className="panel-heading">
-              <div><span className="section-index">CARA BACA</span><h2 id="anomaly-help-title">Prioritas pemeriksaan</h2></div>
-            </div>
+          <details className="panel anomaly-panel anomaly-help">
+            <summary>Prioritas pemeriksaan dan batasan data</summary>
             <div className="anomaly-help-body">
               <p><strong>Kritis</strong> — Kirim lebih dari 2 hari tanpa pasangan Terima, atau Kirim lebih dari 7 hari tanpa pasangan Terima.</p>
               <p><strong>Warning</strong> — LoadingLocation Kirim kosong, Kirim berpasangan ke Terima yang sudah dihapus, Kirim berpasangan ke Terima selanjutnya sehingga ada Terima sebelumnya yang belum berpasangan, SK kirim berpasangan SK terima yang dtEmpty ≤ dtLoaded SK kirim, atau CDN Kirim dan Terima berbeda.</p>
               <p className="helper">Dashboard hanya menunjukkan indikasi. Periksa bukti dan relasi di menu Analisa transaksi; tidak ada perubahan data otomatis.</p>
             </div>
-          </section>
+          </details>
         </aside>
       </div>
     </>

@@ -4,7 +4,7 @@ Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi eq
 
 ## Apa itu aplikasi ini
 
-- **Tujuan:** satu layar untuk melihat status seluruh PC target (online/offline, latency), mencari truck, mencari LocationID otomatis, dan mengirim perubahan `isGenerateCDN` ke PC target dalam beberapa klik — tanpa mengedit konfigurasi PC satu per satu secara manual.
+- **Tujuan:** satu layar untuk melihat status seluruh PC target (online/offline, latency), memilih truck tanpa lookup lokasi, dan mengirim perubahan `isGenerateCDN` ke PC target dalam beberapa klik — tanpa mengedit konfigurasi PC satu per satu secara manual.
 - **Pengguna:** akun individual dengan role dan permission per menu/aksi. Autentikasi disimpan di database `ITMonitor`, terpisah dari database produksi pada instance SQL Server yang sama.
 - **Stack:** NestJS 12 + TypeScript (backend), React 19 + TypeScript (frontend SPA, di-bundle esbuild), mssql, axios, ping, jsonwebtoken. Node.js 22.13+.
 - **Arsitektur:** browser SPA berkomunikasi ke backend NestJS di port 3000 via HTTP + JWT. Backend baca data referensi dari SQL Server pusat dan mengirim/ambil data konfigurasi langsung ke API lokal di tiap PC target.
@@ -16,7 +16,7 @@ Aplikasi web internal untuk tim IT Dev Ops mengelola dan mengirim konfigurasi eq
 1. Login dengan akun dari `ITMonitor` (token JWT berlaku 12 jam; status user dan izin diperiksa setiap request).
 2. Tambah/edit PC target: isi nama PC, IPv4, dan pilih satu atau lebih lokasi DB.
 3. Ping seluruh PC atau PC tertentu untuk melihat status online/offline dan latency.
-4. Pilih truck, lalu cari LocationID otomatis: backend mencoba setiap lokasi terdaftar PC satu per satu. PC offline langsung dihentikan tanpa menunggu timeout.
+4. Pilih PC target dan truck. Tidak ada GET EquipmentChecks atau pemilihan lokasi sebelum kirim; backend selalu mengirim `locationID: 0`.
 5. Setel `isGenerateCDN`, konfirmasi, lalu kirim konfigurasi ke PC target. Muat ulang data PC setelah timeout pengiriman sebelum mencoba kembali.
 
 ### Kontrak API PC target
@@ -29,7 +29,7 @@ GET  http://{ip}{API_BASE_PATH}/api/EquipmentChecks?equipmentID={id}&locationID=
 POST http://{ip}{API_BASE_PATH}/api/EquipmentChecks/upsert
 ```
 
-`API_BASE_PATH` default `/SNCAutoWBLocalAPI`. Lookup mencocokkan `equipmentID` dan `locationID` di sisi server. Payload upsert: `{ equipmentID, locationID, isGenerateCDN }`. Timeout upsert 10 detik.
+`API_BASE_PATH` default `/SNCAutoWBLocalAPI`. Alur kirim tidak memakai GET/lookup; endpoint baca lama tetap tersedia. Payload upsert: `{ equipmentID, locationID: 0, isGenerateCDN }`. Backend menetapkan lokasi 0, memvalidasi truck, dan memeriksa TCP port 80 sebelum POST. Timeout upsert 10 detik.
 
 Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi. Jika API lokal berbeda, sesuaikan `src/pc.ts` dan `src/api.ts`.
 
@@ -116,7 +116,7 @@ Variabel PRD tersedia di `.env.example`. Tambahan koneksi SQL Server:
 ]
 ```
 
-Alamat di atas hanya contoh dokumentasi, bukan PC bawaan. ID PC dibuat otomatis oleh aplikasi. IP hanya IPv4 literal, tanpa protokol/port/path. LocationID wajib integer nonnegatif dan lokasi aktif type 7. Daftar lokasi kosong diperbolehkan, tetapi PC tersebut belum dapat menerima konfigurasi.
+Alamat di atas hanya contoh dokumentasi, bukan PC bawaan. ID PC dibuat otomatis oleh aplikasi. IP hanya IPv4 literal, tanpa protokol/port/path. LocationID wajib integer nonnegatif dan lokasi aktif type 7. Daftar lokasi kosong diperbolehkan dan tidak menghalangi upsert; pengiriman selalu memakai `locationID: 0`.
 
 Registry dibaca dari SQL pada setiap operasi. Mutasi memakai transaksi SERIALIZABLE dan lock tabel target untuk mencegah konflik lintas worker; daftar lokasi JSON diganti atomik. Penghapusan PC hanya menghapus baris registry, bukan data produksi atau log audit. Backup registry kini melalui backup ITMonitor.
 
@@ -125,9 +125,9 @@ Registry dibaca dari SQL pada setiap operasi. Mutasi memakai transaksi SERIALIZA
 1. Login menggunakan akun individual dari `ITMonitor`.
 2. Tambah PC, isi IPv4, lalu pilih satu atau beberapa lokasi DB.
 3. Ping seluruh PC atau PC tertentu. Online ICMP tidak menjamin layanan API HTTP sehat; request data tetap dapat gagal.
-4. Pilih PC dan truck. Lookup memeriksa TCP terlebih dahulu lalu lokasi PC berurutan. Error koneksi menghentikan loop.
-5. Jika pasangan belum ditemukan, pilih lokasi terdaftar secara manual untuk konfigurasi baru. Atur `isGenerateCDN`, lalu konfirmasi pengiriman.
-6. Klik **Muat data PC** untuk memeriksa konfigurasi langsung pada PC target. Setelah timeout pengiriman, muat ulang sebelum mencoba kembali: request mungkin sudah diterapkan oleh PC meskipun respons tidak diterima.
+4. Pilih PC dan truck, tanpa lookup atau pemilihan lokasi.
+5. Atur `isGenerateCDN`, lalu konfirmasi pengiriman. Backend mengirim `locationID: 0` setelah validasi truck dan pemeriksaan TCP.
+6. Setelah timeout pengiriman, periksa konfigurasi melalui API target sebelum mencoba kembali: request mungkin sudah diterapkan meskipun respons tidak diterima.
 
 Log aktivitas hanya untuk sesi halaman aktif, bukan audit trail permanen. UI menggunakan status hasil ping terakhir, bukan koneksi real-time. Semua operasi API selain login memakai JWT; aset halaman login harus dapat diakses tanpa JWT.
 
@@ -140,8 +140,8 @@ Aplikasi menyediakan enam menu utama setelah login:
 Kelola daftar PC target dan kirim konfigurasi equipment check (`isGenerateCDN`).
 - Daftar PC dengan IP, status online/offline, latency, dan lokasi yang dilayani. Status adalah hasil pemeriksaan terakhir, bukan real-time.
 - Tombol ping untuk semua PC atau satu PC. Ping berhasil tidak menjamin API HTTP sehat.
-- Pilih truck → lookup LocationID otomatis di PC terpilih. PC offline langsung berhenti tanpa menunggu timeout.
-- Jika konfigurasi belum ada, pilih LocationID dari lokasi terdaftar pada PC, atur Generate SK, lalu kirim konfigurasi.
+- Pilih PC dan nomor truck tanpa GET EquipmentChecks atau pemilihan lokasi.
+- Atur Generate SK, lalu kirim konfigurasi dengan `locationID: 0`.
 - Setelah timeout pengiriman, muat ulang data PC sebelum mencoba kembali.
 
 ### Monitoring transaksi
@@ -192,7 +192,7 @@ POST http://{ip}{API_BASE_PATH}/api/EquipmentChecks/upsert
 
 Lookup mencocokkan `equipmentID` dan `locationID` di sisi server, sehingga tetap benar jika API mengabaikan filter dan mengembalikan seluruh koleksi. Respons harus array atau wrapper `data`, `items`, atau `result`; nama key tidak peka huruf besar/kecil. ID berupa integer atau string digit; flag mendukung boolean, 0/1, dan string `true`/`false`/`0`/`1`.
 
-Payload upsert berisi `{ equipmentID, locationID, isGenerateCDN }` tanpa `apiId`. Respons HTTP 2xx dianggap sukses; error bisnis di dalam body 2xx belum memiliki kontrak. Redirect HTTP tidak diikuti. Timeout upsert 10 detik, lookup per lokasi mengikuti `LOOKUP_TIMEOUT_MS`.
+Payload upsert berisi `{ equipmentID, locationID: 0, isGenerateCDN }` tanpa `apiId`. Lokasi dari browser tidak dipakai; upsert tidak memanggil GET EquipmentChecks atau membaca referensi lokasi. Respons HTTP 2xx dianggap sukses; error bisnis di dalam body 2xx belum memiliki kontrak. Redirect HTTP tidak diikuti. Timeout upsert 10 detik, lookup per lokasi mengikuti `LOOKUP_TIMEOUT_MS`.
 
 **Verifikasi kontrak terhadap satu PC uji sebelum pemakaian produksi.** Jika API lokal memakai endpoint/payload lain, sesuaikan `src/pc.ts` dan metode lookup di `src/api.ts`. Tidak ada percobaan otomatis menulis ke PC produksi selama pembangunan.
 

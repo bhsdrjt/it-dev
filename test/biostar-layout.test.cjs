@@ -12,6 +12,7 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
   const script = `
     sessionStorage.setItem('token', 'fixture-only');
     const job = { id: 'fixture', packageId: 'biostar-review-20261103T081043Z-7ccb662c8ec647a497fbd11ebc8cd8d2', target: '192.0.2.1', status: 'READY', revision: 1, createdAt: '2026-11-03T11:13:37.563Z', summary: { userCount: 1, fingerprintCount: 2, cardCount: 0, relationCount: 0, usersWithoutCredential: 0 }, preview: { revision: 1, changedCount: 0, unchangedCount: 1, users: [{ sourceUsrUid: '1006', sourceUsrId: '4', name: 'Operator fixture', targetUsrId: '4', status: 'Tetap', fingerprintCount: 2, csnCount: 0 }] } };
+    job.preview.users.push({ sourceUsrUid: '1007', sourceUsrId: '5', name: 'Existing fixture', targetUsrId: '', status: 'Dilewati', reason: 'Nama sama persis sudah ada di server tujuan', fingerprintCount: 1, csnCount: 1 });
     let detailRequests = 0;
     let listRequests = 0;
     window.fetch = async (path, options = {}) => {
@@ -43,6 +44,7 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
       [...history.querySelectorAll('button')].find(b => b.textContent === 'Pilih').click();
       await tick();
       check(!history.open, 'select job closes history');
+      check(page.textContent.includes('1 user dilewati') && page.textContent.includes('Nama sama persis sudah ada di server tujuan'), 'preview explains skipped destination names');
       for (const theme of ['light', 'dark']) {
         document.documentElement.dataset.theme = theme;
         await tick();
@@ -54,7 +56,12 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
         for (let i = 1; i < cards.length; i++) check(cards[i].getBoundingClientRect().top - cards[i-1].getBoundingClientRect().bottom >= 12, 'panels have spacing');
         for (const item of page.querySelectorAll('.biostar-meta > div')) check(item.children[1].getBoundingClientRect().top >= item.children[0].getBoundingClientRect().bottom + 4, 'metadata labels separated from values');
         const stats = [...page.querySelector('.biostar-summary').children];
-        check(stats[1].getBoundingClientRect().left > stats[0].getBoundingClientRect().left, 'summary uses columns');
+        check(cards.every(card => !/^[0-9]+[.]/.test(card.querySelector('h2').textContent)), 'section titles have no decorative numbering');
+        check(getComputedStyle(page.querySelector('.biostar-summary')).display === 'flex', 'summary uses compact wrapping metadata');
+        for (const stat of stats) {
+          check(stat.getBoundingClientRect().right <= page.getBoundingClientRect().right, 'summary fits panel');
+          check(getComputedStyle(stat).backgroundColor === 'rgba(0, 0, 0, 0)', 'summary has no separate tinted cards');
+        }
         const trigger = [...page.querySelectorAll('button')].find(b => b.textContent === 'Setujui perubahan ID dan mapping');
         check(trigger, 'single approval action');
         trigger.focus(); trigger.click(); await tick();
@@ -71,8 +78,12 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
         check(document.activeElement === trigger, 'focus returns to trigger');
       }
       const toggle = page.querySelector('[aria-controls="biostar-detail"]');
-      toggle.click(); await tick();
-      check(!document.querySelector('#biostar-detail').hidden && toggle.getAttribute('aria-expanded') === 'true', 'detail toggle works');
+      toggle.focus(); toggle.click(); await tick();
+      const detailModal = document.querySelector('#biostar-detail');
+      check(detailModal.matches(':modal') && toggle.getAttribute('aria-haspopup') === 'dialog', 'package detail opens native modal');
+      const detailRect = detailModal.getBoundingClientRect();
+      check(detailRect.left >= 0 && detailRect.right <= innerWidth && detailRect.top >= 0 && detailRect.bottom <= innerHeight, 'detail modal fits viewport');
+      check(detailModal.contains(document.activeElement), 'detail focus stays inside modal');
       const previousListRequests = listRequests;
       const detailTable = document.querySelector('#biostar-detail table');
       check(detailTable.querySelector('th').textContent === 'Nama pemilik', 'fingerprint owner heading');
@@ -86,7 +97,11 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
       check(detailRequests === 1, 'unchanged job must not reload detail on polling');
       check(document.querySelector('#biostar-detail table') === detailTable, 'detail stays mounted during polling');
       check(!document.querySelector('#biostar-detail').textContent.includes('Memuat detail'), 'no repeated loading message');
+      detailModal.querySelector('[aria-label="Tutup detail paket"]').click(); await tick();
+      check(!document.querySelector('#biostar-detail') && document.activeElement === toggle, 'closing detail restores trigger focus');
       toggle.click(); await tick();
+      document.querySelector('#biostar-detail').dispatchEvent(new Event('cancel', { cancelable: true })); await tick();
+      check(!document.querySelector('#biostar-detail'), 'Escape dismisses detail modal');
       document.documentElement.dataset.theme = 'light';
       page.scrollTop = 0;
       document.body.dataset.testResult = 'passed';

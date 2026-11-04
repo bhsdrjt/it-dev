@@ -13,8 +13,8 @@
 .workspace .access-heading { align-items: center; flex-wrap: wrap; gap: 12px; }
 .access-heading p { margin: 0; color: var(--muted); }
 .access-page .access-button { display: inline-flex; align-items: center; gap: 8px; }
-.access-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border); }
-.access-page .access-tabs button {
+.access-tabs, .view-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border); }
+.workspace main .menu-page :is(.access-tabs, .view-tabs) button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -26,9 +26,10 @@
   background: transparent;
   color: var(--muted);
 }
-.access-page .access-tabs button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
-.access-page .access-tabs button:hover { background: transparent; color: var(--accent); }
-.access-tabs button span { padding: 2px 7px; background: var(--surface); border-radius: var(--radius-sm); font-size: 11px; font-variant-numeric: tabular-nums; }
+.workspace main .menu-page :is(.access-tabs, .view-tabs) button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.workspace main .menu-page :is(.access-tabs, .view-tabs) button:hover:not(:disabled) { background: transparent; color: var(--accent); border-color: transparent; }
+.workspace main .menu-page :is(.access-tabs, .view-tabs) button[aria-pressed="true"]:hover { border-bottom-color: var(--accent); }
+.workspace main .menu-page :is(.access-tabs, .view-tabs) button span { padding: 2px 7px; background: var(--surface); border: 0; margin: 0; border-radius: var(--radius-sm); font-family: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
 .access-section { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .access-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); }
 .access-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; }

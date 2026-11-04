@@ -32,12 +32,6 @@ type Location = {
   LocationID: number;
   strLocationName: string
 };
-type Lookup = {
-  locationID: number | null;
-  locationName: string | null;
-  checkedLocationIDs: number[];
-  message: string
-};
 type Entry = {
   id: number;
   time: string;
@@ -159,12 +153,13 @@ function App() {
     </section>
   </main>;
   if (!profile) return <main className="login-layout"><section className="login-card"><p role="status">{profileError || 'Memuat izin akses…'}</p><button onClick={logout}>Kembali ke login</button></section></main>;
-  return <PermissionsContext.Provider value={profile.permissions}><Dashboard roles={profile.roles ?? []} permissions={profile.permissions} api={api} log={log} entries={entries} logout={() => {
+  return <PermissionsContext.Provider value={profile.permissions}><Dashboard displayName={profile.displayName || profile.username} roles={profile.roles ?? []} permissions={profile.permissions} api={api} log={log} entries={entries} logout={() => {
     log('info', 'Logout.');
     logout();
   }} /></PermissionsContext.Provider>;
 }
-function Dashboard({ api, log, entries, logout, permissions, roles }: {
+function Dashboard({ api, log, entries, logout, permissions, roles, displayName }: {
+  displayName: string;
   roles: string[];
   permissions: string[];
   api: RequestApi;
@@ -193,12 +188,8 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
   const [locations, setLocations] = useState<Location[]>([]);
   const [apiId, setApiId] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
-  const [locationId, setLocationId] = useState('');
   const [flag, setFlag] = useState(false);
-  const [lookup, setLookup] = useState<Lookup | null>(null);
-  const [lookupError, setLookupError] = useState('');
-  const [lookupBusy, setLookupBusy] = useState(false);
-  const [lookupRevision, setLookupRevision] = useState(0);
+  const [sendMessage, setSendMessage] = useState('');
   const [pcSearch, setPcSearch] = useState('');
   const [truckSearch, setTruckSearch] = useState('');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -207,8 +198,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
   const [editor, setEditor] = useState<Pc | 'new' | null>(null);
   const [lastPing, setLastPing] = useState('Belum diperiksa');
   const logEnd = useRef<HTMLDivElement>(null);
-  const selected = pcs.find(pc => pc.id === apiId);
-  const allowed = selected?.locationIDs || [];
+  const selected = pcs.find(pc => pc.id === apiId && pc.online === true);
   const online = pcs.filter(pc => pc.online === true).length;
   const offline = pcs.filter(pc => pc.online === false).length;
   const setError = useCallback((key: string, value: string) => setErrors(old => ({ ...old, [key]: value })), []);
@@ -257,43 +247,10 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
     const panel = logEnd.current?.parentElement;
     if (panel) panel.scrollTop = panel.scrollHeight;
   }, [entries, page]);
-  // Identitas lookup mencakup IP/lokasi; mengedit PC yang sama tetap memicu lookup baru.
-  // Cleanup effect membatalkan request lama supaya responsnya tidak menimpa pilihan baru.
-  const selectedKey = selected ? `${selected.id}:${selected.ipAPI}:${selected.locationIDs.join(',')}` : '';
-  useEffect(() => {
-    setLocationId('');
-    setLookup(null);
-    setLookupError('');
-    setFlag(false);
-    if (!selected || !equipmentId) {
-      setLookupBusy(false);
-      return;
-    }
-    const controller = new AbortController();
-    setLookupBusy(true);
-    log('info', `Lookup equipment ${equipmentId} pada ${pcLabel(selected)}.`);
-    api<Lookup>(`/equipment-checks/location?apiId=${encodeURIComponent(selected.id)}&equipmentId=${equipmentId}`, 'GET', undefined, controller.signal)
-      .then(result => {
-        if (controller.signal.aborted) return;
-        setLookup(result);
-        setLocationId(result.locationID === null ? '' : String(result.locationID));
-        log(result.locationID === null ? 'info' : 'ok', result.message, `Lokasi diperiksa: ${result.checkedLocationIDs.join(', ') || 'tidak ada'}`);
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) {
-          setLookupError(message(error));
-          log('err', message(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLookupBusy(false);
-      });
-    return () => controller.abort();
-  }, [selectedKey, equipmentId, lookupRevision, api, log]);
   function selectPc(id: string) {
-    if (id === apiId) return;
+    if (id === apiId || (id && !pcs.some(pc => pc.id === id && pc.online === true))) return;
     setApiId(id);
-    setLocationId('');
+    setFlag(false);
     setError('send', '');
   }
   function selectTruck(value: string) {
@@ -302,9 +259,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
     const id = matches.length === 1 ? String(matches[0].EquipmentID) : '';
     if (id === equipmentId) return;
     setEquipmentId(id);
-    setLocationId('');
-    setLookup(null);
-    setLookupError('');
+    setFlag(false);
     setError('send', '');
   }
   async function pingAll(pc?: Pc) {
@@ -318,18 +273,20 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
     });
   }
   async function send() {
-    if (!selected || !equipmentId || locationId === '' || lookupBusy || lookupError) return;
+    if (!selected || !equipmentId) return;
     const truck = equipment.find(row => row.EquipmentID === Number(equipmentId));
-    if (!await confirmAction(`Kirim konfigurasi ke ${pcLabel(selected)}?\nTruck: ${truck?.strTruckCN || equipmentId}\nLocationID: ${locationId}\nisGenerateCDN: ${flag}\n\nKonfigurasi pada API target akan diperbarui.`)) {
+    if (!await confirmAction(`Kirim konfigurasi ke ${pcLabel(selected)}?\nTruck: ${truck?.strTruckCN || equipmentId}\nLocationID: 0\nisGenerateCDN: ${flag}\n\nKonfigurasi pada API target akan diperbarui.`)) {
       log('info', 'Pengiriman konfigurasi dibatalkan.');
       return;
     }
     await run('send', async () => {
+      setSendMessage('');
       log('info', `Mengirim konfigurasi ke ${pcLabel(selected)}.`);
       const result = await api<{
         message: string
-      }>('/equipment-checks/upsert', 'POST', { apiId, equipmentID: Number(equipmentId), locationID: Number(locationId), isGenerateCDN: flag });
+      }>('/equipment-checks/upsert', 'POST', { apiId, equipmentID: Number(equipmentId), locationID: 0, isGenerateCDN: flag });
       log('ok', result.message);
+      setSendMessage(`Berhasil mengirim konfigurasi truck ${truck?.strTruckCN || equipmentId} ke ${pcLabel(selected)}. ${result.message}`);
       setError('send', '');
     });
   }
@@ -364,12 +321,18 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
         {isAdmin && <button aria-current={page === 'audit' ? 'page' : undefined} onClick={() => setPage('audit')}><MenuIcon name="audit" /> User Audit</button>}
         <button hidden={!can('activity.view')} aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
       </nav>
-      <span className="sidebar-footer">INTERNAL OPERATIONS<br />IT Dev Ops · v1.0</span>
+      <div className="sidebar-bottom">
+        <ThemeToggle />
+        <span className="sidebar-footer">INTERNAL OPERATIONS<br />IT Dev Ops · v1.0</span>
+      </div>
     </aside>
     <header className="topbar">
       <span className="topbar-context">{firstPage ? pageLabel[page] : 'Akses workspace'} <span>/</span> Control workspace</span>
       <div className="topbar-right">
-        <ThemeToggle />
+        <div className="signed-in-user" aria-label="User login">
+          <strong title={displayName}>{displayName}</strong>
+          <span title={roles.join(', ') || 'Tanpa role'}>{roles.join(', ') || 'Tanpa role'}</span>
+        </div>
         <button className="icon-button" aria-label="Keluar" title="Keluar" onClick={logout} disabled={busy.send || busy.mutation}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
         </button>
@@ -406,12 +369,6 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
             <span><i className="dot offline" /> Offline</span>
             <strong>
               {offline.toString().padStart(2, '0')}
-            </strong>
-          </div>
-          <div>
-            <span>Lokasi referensi</span>
-            <strong>
-              {busy.locations ? '…' : errors.locations ? '—' : locations.length.toString().padStart(2, '0')}
             </strong>
           </div>
           <p>Status merupakan hasil pemeriksaan terakhir, bukan pemantauan real-time.</p>
@@ -457,7 +414,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
                   <tbody>
                     {pcRows.map(pc => <tr key={pc.id} className={apiId === pc.id ? 'selected-row' : ''}>
                       <td>
-                        <button className="pc-select" aria-pressed={apiId === pc.id} disabled={busy.send} onClick={() => selectPc(pc.id)}>
+                        <button className="pc-select" aria-pressed={apiId === pc.id} disabled={busy.send || pc.online !== true} onClick={() => selectPc(pc.id)}>
                           {pc.apiName}
                         </button>
                         <span className="ip mono">
@@ -517,31 +474,16 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
                 <span className="small-tag">UPSERT</span>
               </div>
               <div className="form-body">
-                <label>API target<select value={apiId} onChange={e => selectPc(e.target.value)} disabled={busy.send}>
-                  <option value="">Pilih API target</option>
-                  {pcs.map(pc => <option key={pc.id} value={pc.id}>{pc.apiName} · {pc.ipAPI}</option>)}
+                <label>API target<select value={selected?.id ?? ''} onChange={e => selectPc(e.target.value)} disabled={busy.send}>
+                  <option value="">{online ? 'Pilih API target online' : 'Tidak ada API online'}</option>
+                  {pcs.filter(pc => pc.online === true).map(pc => <option key={pc.id} value={pc.id}>{pc.apiName} · {pc.ipAPI}</option>)}
                 </select></label>
                 <fieldset disabled={busy.send || busy.equipment || !!errors.equipment}>
                   <label htmlFor="truck-picker">Truck / Equipment<Combobox id="truck-picker" value={truckSearch} onChange={selectTruck} options={equipment.map(row => `${row.strTruckCN} · #${row.EquipmentID}`)} placeholder={busy.equipment ? 'Memuat truck…' : 'Ketik nama truck atau EquipmentID'} describedBy="truck-selection" disabled={busy.send || busy.equipment || !!errors.equipment} /></label>
                   <span id="truck-selection" className="helper" role="status">
-                    {equipmentId ? `EquipmentID #${equipmentId} terpilih. Lokasi mengikuti API target.` : truckSearch ? 'Pilih truck dari saran atau masukkan nama / ID yang cocok.' : 'Pilih sekali. Truck dan equipment memakai pilihan yang sama.'}
+                    {equipmentId ? `EquipmentID #${equipmentId} terpilih. Dikirim langsung dengan LocationID 0.` : truckSearch ? 'Pilih truck dari saran atau masukkan nama / ID yang cocok.' : 'Pilih sekali. Truck dan equipment memakai pilihan yang sama.'}
                   </span>
                 </fieldset>
-                <div className={`lookup-box ${lookupError ? 'lookup-failed' : ''}`} aria-live="polite">
-                  <span className="section-index">LOOKUP LOKASI OTOMATIS</span>
-                  <strong>
-                    {lookupBusy ? 'Memeriksa lokasi…' : lookupError ? 'Lookup gagal' : lookup?.locationName || (lookup ? 'Konfigurasi belum ditemukan' : 'Menunggu truck dipilih')}
-                  </strong>
-                  <p>
-                    {lookupError || lookup?.message || 'Pilih API dan truck. Lokasi diperiksa berurutan pada API target.'}
-                  </p>
-                  {lookup && <span className="mono">Diperiksa: {lookup.checkedLocationIDs.map(id => `#${id}`).join(', ') || 'tidak ada lokasi'}</span>}
-                  {selected && equipmentId && <button className="text-button" aria-busy={lookupBusy} onClick={() => setLookupRevision(n => n + 1)} disabled={lookupBusy || busy.send}>Lookup ulang</button>}
-                </div>
-                <label>LocationID<select value={locationId} onChange={e => setLocationId(e.target.value)} disabled={!lookup || lookupBusy || !!lookupError || busy.send}>
-                  <option value="">Pilih lokasi terdaftar</option>
-                  {allowed.map(id => <option key={id} value={id}>#{id} · {locations.find(l => l.LocationID === id)?.strLocationName || 'Nama tidak tersedia'}</option>)}
-                </select><span className="helper">Untuk konfigurasi baru, pilih lokasi API setelah lookup selesai.</span></label>
                 <label className="toggle-row">
                   <span>
                     <strong>Generate SK</strong>
@@ -552,10 +494,16 @@ function Dashboard({ api, log, entries, logout, permissions, roles }: {
                     {String(flag)}
                   </span>
                 </label>
+                {(busy.send || sendMessage) && <div className="success dismissible-notice" role="status" aria-live="polite" aria-busy={!!busy.send}>
+                  <span>{busy.send ? 'Mengirim konfigurasi; menunggu respons API target. Jangan tutup halaman atau kirim ulang…' : sendMessage}</span>
+                  {!busy.send && <button type="button" aria-label="Tutup notifikasi" title="Tutup notifikasi" onClick={() => setSendMessage('')}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                  </button>}
+                </div>}
                 {errors.send && <p className="error" role="alert">
                   {errors.send}
                 </p>}
-                <button hidden={!can('equipment.configure')} className="primary wide" aria-busy={!!busy.send} onClick={() => void send()} disabled={!selected || !equipmentId || locationId === '' || !allowed.includes(Number(locationId)) || !lookup || lookupBusy || !!lookupError || busy.send || busy.mutation || !!errors.equipment || !!errors.locations}>
+                <button hidden={!can('equipment.configure')} className="primary wide" aria-busy={!!busy.send} onClick={() => void send()} disabled={!selected || !equipmentId || busy.send || busy.mutation || busy.equipment || !!errors.equipment}>
                   {busy.send ? 'Mengirim konfigurasi…' : 'Kirim konfigurasi'}
                 </button>
                 <p className="footnote">Perubahan ditulis langsung ke API target.</p>

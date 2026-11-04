@@ -15,12 +15,16 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
     const permissions = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, name: 'transactions.' + 'long_permission_code_'.repeat(5) + i }));
     const writes = [];
     let failSave = false;
+    let holdReads = true;
+    let pendingReads = [];
+    const releaseReads = () => { holdReads = false; pendingReads.splice(0).forEach(resolve => resolve()); };
     window.fetch = async (path, options = {}) => {
       if (options.method === 'PUT' || options.method === 'POST') {
         writes.push({ path, body: JSON.parse(options.body) });
         if (failSave) return { ok: false, status: 400, json: async () => ({ message: 'Fixture save failed' }) };
         return { ok: true, json: async () => ({}) };
       }
+      if (holdReads && ['/auth/admin/users', '/auth/admin/roles'].includes(path)) await new Promise(resolve => pendingReads.push(resolve));
       const data = path === '/auth/me' ? { userId: 1, username: 'admin', displayName: 'Admin', permissions: ['access.manage'] }
         : path === '/auth/admin/users' ? { users: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, username: 'user_' + i, displayName: 'User ' + i, isActive: true })), userRoles: [{ userId: 1, roleId: 1 }] }
         : path === '/auth/admin/roles' ? { roles, permissions, rolePermissions: [{ roleId: 1, permissionId: 1 }] } : [];
@@ -34,6 +38,11 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
         [...document.querySelectorAll('button')].find(node => node.textContent.includes('Manajemen akses')).click();
         await tick();
         const page = document.querySelector('.access-page');
+        check(page.querySelectorAll('.anomaly-skeleton .skeleton-row').length === 5, 'initial access load shows shared skeleton');
+        check(page.querySelector('#access-users').hidden && !page.querySelector('.access-empty').checkVisibility(), 'no false empty state while loading');
+        check(page.scrollWidth <= page.clientWidth + 1, 'skeleton fits viewport');
+        releaseReads(); await tick();
+        check(!page.querySelector('.anomaly-skeleton'), 'loaded access replaces skeleton');
         check(page && page.querySelectorAll('#access-users .access-record').length === 5, 'all users loaded');
         check(page.querySelectorAll('#access-roles .access-record').length === 4, 'all roles loaded');
         check(!page.querySelector('dialog[open]') && !page.querySelector('details'), 'all editors use closed modals');
@@ -62,7 +71,18 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
           document.documentElement.dataset.theme = theme;
           document.querySelector('#access-users-tab').click(); await tick();
           layout();
+          const reload = page.querySelector('button[aria-label="Muat ulang"]');
+          check(reload.classList.contains('icon-button') && !reload.textContent.trim() && reload.querySelector('svg'), 'access refresh uses shared icon button');
+          holdReads = true;
+          reload.click(); await tick();
+          check(page.querySelector('.anomaly-skeleton') && page.querySelector('#access-users').hidden && reload.disabled, 'refresh replaces stale list with skeleton');
+          document.querySelector('#access-roles-tab').click(); await tick();
+          check(page.querySelector('.anomaly-skeleton').getAttribute('aria-label') === 'Role & izin workspace', 'role tab uses matching skeleton');
+          releaseReads(); await tick();
+          check(!page.querySelector('.anomaly-skeleton'), 'refresh clears skeleton');
+          document.querySelector('#access-users-tab').click(); await tick();
           const add = page.querySelector('button[aria-label="Tambah user"]');
+          check(add.classList.contains('primary') && getComputedStyle(add).backgroundColor === 'rgb(125, 211, 252)', 'add user uses same blue primary as equipment add');
           add.focus(); add.click(); await tick();
           const createModal = page.querySelector('.access-modal[open]');
           check(createModal.matches(':modal'), 'create user opens native modal');

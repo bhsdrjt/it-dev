@@ -15,7 +15,7 @@ const paths: Record<IconName, string> = {
   reset: 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-4',
   open: 'M7 17 17 7M8 7h9v9',
   close: 'M6 6l12 12M6 18 18 6',
-  history: 'M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7M12 7v5l3 2',
+  history: 'M14 3H5v18h14V8l-5-5ZM14 3v5h5M8 12h8M8 16h8',
 };
 
 /** Ikon dekoratif; nama aksi selalu dibawa lewat title + aria-label pada tombol induk. */

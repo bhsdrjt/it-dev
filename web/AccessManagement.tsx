@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { confirmAction } from './confirm-action';
 import { Icon } from './Icon';
+import { SkeletonPanel } from './SkeletonPanel';
 import './access-management.css';
 
 type User = { id: number; username: string; displayName: string; isActive: boolean };
@@ -13,7 +14,7 @@ function AccessEditor({ title, icon = 'edit', disabled, error, notice, onOpen, c
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   return <>
-    <button type="button" className="access-edit-button" title={title} aria-label={title} aria-haspopup="dialog" disabled={disabled} onClick={() => { onOpen(); dialog.current?.showModal(); }}><Icon name={icon} /></button>
+    <button type="button" className={`access-edit-button${icon === 'plus' ? ' primary' : ''}`} title={title} aria-label={title} aria-haspopup="dialog" disabled={disabled} onClick={() => { onOpen(); dialog.current?.showModal(); }}><Icon name={icon} /></button>
     <dialog ref={dialog} className="access-modal" aria-labelledby={titleId} onCancel={event => { if (disabled) event.preventDefault(); }}>
       <header className="access-modal-heading"><h2 id={titleId}>{title}</h2><button type="button" className="access-edit-button" autoFocus title="Tutup" aria-label="Tutup" disabled={disabled} onClick={() => dialog.current?.close()}><Icon name="close" /></button></header>
       <div className="access-modal-body">
@@ -73,7 +74,7 @@ export function AccessManagement({ api }: { api: Api }) {
   return <div className="access-page menu-page">
     <header className="page-heading access-heading">
       <h1>Manajemen akses</h1>
-      <button className="access-button" disabled={disabled} onClick={() => { setError(''); void load().catch(e => setError(e instanceof Error ? e.message : 'Gagal memuat akses.')); }}><Icon name="reload" />Muat ulang</button>
+      <button type="button" className="icon-button" title="Muat ulang" aria-label="Muat ulang" aria-busy={loading} disabled={disabled} onClick={() => { setError(''); void load().catch(e => setError(e instanceof Error ? e.message : 'Gagal memuat akses.')); }}><Icon name="reload" /></button>
     </header>
     {error && <p className="error" role="alert">{error}</p>}
     {notice && <p className="access-notice" role="status">{notice}</p>}
@@ -81,8 +82,8 @@ export function AccessManagement({ api }: { api: Api }) {
       <button id="access-users-tab" aria-pressed={tab === 'users'} aria-controls="access-users" onClick={() => setTab('users')}>User <span>{loaded ? users.users.length : '…'}</span></button>
       <button id="access-roles-tab" aria-pressed={tab === 'roles'} aria-controls="access-roles" onClick={() => setTab('roles')}>Role & izin <span>{loaded ? roles.roles.length : '…'}</span></button>
     </nav>
-    {loading && <p className="access-loading" role="status">Memuat data akses…</p>}
-    <section id="access-users" className="access-section" aria-labelledby="access-users-tab" hidden={tab !== 'users' || !loaded}>
+    {loading && !busy && <SkeletonPanel title={tab === 'users' ? 'Daftar user' : 'Role & izin workspace'} rows={5} />}
+    <section id="access-users" className="access-section" aria-labelledby="access-users-tab" hidden={tab !== 'users' || !loaded || (loading && !busy)}>
       <section className="access-card access-directory" aria-labelledby="access-directory-title">
         <header className="access-card-heading"><h2 id="access-directory-title">Daftar user <span className="access-total">· {users.users.filter(user => user.isActive).length} aktif</span></h2>
         <AccessEditor title="Tambah user" icon="plus" disabled={disabled} error={error} notice={notice} onOpen={() => { setError(''); setNotice(''); }}>
@@ -150,7 +151,7 @@ export function AccessManagement({ api }: { api: Api }) {
         </div>
       </section>
     </section>
-    <section id="access-roles" className="access-section" aria-labelledby="access-roles-tab" hidden={tab !== 'roles' || !loaded}>
+    <section id="access-roles" className="access-section" aria-labelledby="access-roles-tab" hidden={tab !== 'roles' || !loaded || (loading && !busy)}>
       <section className="access-card" aria-labelledby="access-role-title">
         <header className="access-card-heading"><h2 id="access-role-title">Role & izin workspace</h2><span className="access-total">{roles.permissions.length} izin</span></header>
         <div className="access-list">

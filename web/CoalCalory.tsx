@@ -136,7 +136,6 @@ export function CoalCalory({ api, log }: Props) {
     <section className="panel registry coal-calory-panel" aria-label="Data Coal Calory">
       <div className="panel-heading">
         <div>
-          <span className="section-index">01 / COAL CALORY</span>
           <h2>Data kualitas batu bara <span className="count">{rows.length}</span></h2>
         </div>
         <span className="small-tag" hidden={!hasActions}>{[can('coal.update') && 'EDIT', can('coal.delete') && 'HAPUS'].filter(Boolean).join(' / ')}</span>

@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import './user-audit.css';
+import { Icon } from './Icon';
+import { SkeletonPanel } from './SkeletonPanel';
 import { auditActivity, auditOutcome, auditTarget, outcomes } from './audit-labels';
 
 type Row = { id: string; actorUserId: number | null; username: string | null; displayName: string | null; action: string; target: string; operationId: string | null; outcome: string; createdAt: string };
@@ -28,7 +30,7 @@ export function UserAudit({ api }: { api: Api }) {
     setOffset(0); setFilters(params.toString()); setRefresh(value => value + 1);
   }
   return <section className="audit-page menu-page" aria-label="User Audit">
-    <div className="page-heading"><h1>User Audit</h1><button disabled={busy} onClick={() => setRefresh(value => value + 1)}>Muat ulang</button></div>
+    <div className="page-heading"><h1>User Audit</h1><button type="button" className="icon-button" title="Muat ulang" aria-label="Muat ulang" aria-busy={busy} disabled={busy} onClick={() => setRefresh(value => value + 1)}><Icon name="reload" /></button></div>
     <form className="audit-filters" onSubmit={filter}>
       <label>Username<input name="user" maxLength={200} placeholder="Semua user" /></label>
       <label>Hasil<select name="outcome"><option value="">Semua hasil</option>{Object.entries(outcomes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -38,7 +40,7 @@ export function UserAudit({ api }: { api: Api }) {
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     <div className="audit-table" tabIndex={0} role="region" aria-label="Daftar audit" aria-busy={busy}>
-      {busy ? <p role="status">Memuat audit…</p> : data && !data.rows.length ? <p role="status">Tidak ada audit untuk filter ini.</p> : data && <table>
+      {busy ? <SkeletonPanel title="Daftar audit" rows={6} /> : data && !data.rows.length ? <p role="status">Tidak ada audit untuk filter ini.</p> : data && <table>
         <thead><tr>{['User', 'Aktivitas', 'Target', 'Hasil', 'Waktu (lokal)'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
         <tbody>{data.rows.map(row => <tr key={row.id}>
           <td>{row.displayName || '—'}<br /><span className="muted">{row.username || (row.actorUserId === null ? 'Sistem' : `User #${row.actorUserId}`)}</span></td>
