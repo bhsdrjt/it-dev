@@ -67,11 +67,15 @@ SELECT Name FROM (VALUES
 -- Seed newly created roles only: reruns must not restore grants revoked by administrators.
 INSERT dbo.AuthRolePermissions(RoleId,PermissionId)
 SELECT r.Id,p.Id FROM @newRoles r CROSS JOIN dbo.AuthPermissions p
-WHERE r.Name=N'admin'
+WHERE p.Name <> N'biostar.import' AND (
+ r.Name=N'admin'
  OR p.Name LIKE N'%.view'
  OR (r.Name=N'it_operator' AND p.Name IN(N'equipment.manage_pc',N'equipment.ping',N'equipment.configure'))
  OR (r.Name=N'transaction_operator' AND p.Name IN(N'transactions.copy_loading',N'transactions.generate_receipt',N'transactions.pair',N'transactions.unpair',N'transactions.replay_raw'))
- OR (r.Name=N'coal_editor' AND p.Name IN(N'coal.update',N'coal.import',N'coal.export'));
+ OR (r.Name=N'coal_editor' AND p.Name IN(N'coal.update',N'coal.import',N'coal.export')));
+-- Full BioStar import access is assigned explicitly by an administrator.
+IF NOT EXISTS(SELECT 1 FROM dbo.AuthPermissions WHERE Name=N'biostar.import')
+ INSERT dbo.AuthPermissions(Name) VALUES(N'biostar.import');
 COMMIT;
 END TRY
 BEGIN CATCH

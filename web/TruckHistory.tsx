@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Combobox } from './Combobox';
 import { DateField, TimeField } from './DateTimeField';
 import { Icon } from './Icon';
@@ -26,7 +26,7 @@ const shift = (iso: string, hours: number) => {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
 };
-const windowAround = (eventAt: string | undefined, date: string) => ({ start: eventAt ? shift(eventAt, -3) : `${date}T00:00:00`, end: eventAt ? shift(eventAt, 3) : `${date}T23:59:59` });
+const windowAround = (eventAt: string | undefined, date: string) => ({ start: eventAt ? shift(eventAt, -3) : `${date}T00:00:00`, end: eventAt ? shift(eventAt, 5) : `${date}T23:59:59` });
 export function TruckHistory({ api, initialTarget = null }: Props) {
   const [equipment, setEquipment] = useState<{ EquipmentID: number; strTruckCN: string }[]>([]);
   const [equipmentError, setEquipmentError] = useState('');
@@ -60,17 +60,7 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
       node.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     });
   };
-  useEffect(() => {
-    if (!initialTarget) return;
-    const window = windowAround(initialTarget.eventAt, initialTarget.date);
-    setTruck(label(initialTarget));
-    setStart(window.start);
-    setEnd(window.end);
-    setResult(null);
-    setTab('transactions');
-    setPage(0);
-    setError('');
-  }, [initialTarget]);
+  useEffect(() => () => pending.current?.abort(), []);
   // Kembali ke atas saat pindah halaman/tab; gulir bisa di window, workspace, atau panel ritase.
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
@@ -82,8 +72,7 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
   const matches = equipment.filter(row => truck.trim() === `${row.strTruckCN} · #${row.EquipmentID}` || truck.trim().toLowerCase() === row.strTruckCN?.trim().toLowerCase());
   const labelId = truck.trim().match(/#(\d+)$/)?.[1];
   const equipmentId = matches.length === 1 ? matches[0].EquipmentID : /^\d+$/.test(truck.trim()) ? Number(truck.trim()) : labelId ? Number(labelId) : 0;
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  const search = useCallback(async (equipmentId: number, start: string, end: string) => {
     if (pending.current) return;
     setError('');
     setResult(null);
@@ -101,9 +90,33 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Timeline truck gagal dimuat.');
     } finally {
-      pending.current = null;
-      if (!controller.signal.aborted) { setBusy(false); setHistoryLoading(false); }
+      if (pending.current === controller) {
+        pending.current = null;
+        setBusy(false);
+        setHistoryLoading(false);
+      }
     }
+  }, [api]);
+  const consumedTarget = useRef<Props['initialTarget']>(null);
+  useEffect(() => {
+    if (!initialTarget || consumedTarget.current === initialTarget) return;
+    consumedTarget.current = initialTarget;
+    pending.current?.abort();
+    pending.current = null;
+    setBusy(false);
+    setHistoryLoading(false);
+    const window = windowAround(initialTarget.eventAt, initialTarget.date);
+    setTruck(label(initialTarget));
+    setStart(window.start);
+    setEnd(window.end);
+    setRelationRow(null);
+    setTab('transactions');
+    setPage(0);
+    void search(initialTarget.equipmentId, window.start, window.end);
+  }, [initialTarget, search]);
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void search(equipmentId, start, end);
   }
   const transactions = result?.transactions.filter(row => transactionKind(row) !== 'TerimaRaw') ?? [];
   const rows = tab === 'transactions' ? transactions : result?.activities ?? [];
@@ -141,14 +154,14 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
       <button className="primary transaction-icon-button" title="Tampilkan timeline" aria-label="Tampilkan timeline" aria-busy={busy} disabled={busy}><Icon name="search" /></button>
     </form>
     <p className="helper" id="history-time-help">Waktu mengikuti jam database, tanpa konversi zona waktu. Pilih tanggal dan jam dengan picker. Batas mulai dan selesai termasuk hasil.</p>
-    {initialTarget && <p className="helper anomaly-target-note" role="status">Dari Monitoring transaksi: SK <strong className="mono">{initialTarget.cdn ?? '—'}</strong> · {initialTarget.date}. Rentang terisi otomatis 3 jam sebelum dan 3 jam setelah waktu temuan. Tekan Tampilkan timeline untuk memuat.</p>}
+    {initialTarget && <p className="helper anomaly-target-note" role="status">Dari Monitoring transaksi: SK <strong className="mono">{initialTarget.cdn ?? '—'}</strong> · {initialTarget.date}. Rentang 3 jam sebelum dan 5 jam setelah waktu temuan dimuat otomatis.</p>}
     {equipmentError && <p className="error" role="alert">Daftar truck gagal dimuat. Masukkan EquipmentID manual. {equipmentError}</p>}
     {error && <p className="error" role="alert">{error}</p>}
     {busy && <p role="status" aria-busy="true">Memuat riwayat truck…</p>}
     {historyLoading && <SkeletonPanel title="Timeline truck" subtitle="Pilih truck dan rentang waktu untuk melihat riwayat transaksi serta aktivitas reader." rows={4} />}
     {!historyLoading && result && <>
       <div className="transaction-summary" role="status">
-        <div><span>Truck</span><strong>{equipment.find(row => row.EquipmentID === result.equipmentId)?.strTruckCN || '—'} · #{result.equipmentId}</strong></div>
+        <div><span>Truck</span><strong>{equipment.find(row => row.EquipmentID === result.equipmentId)?.strTruckCN || '—'} #{result.equipmentId}</strong></div>
         <div><span>Mulai</span><strong>{time(result.starttime)}</strong></div>
         <div><span>Selesai</span><strong>{time(result.endtime)}</strong></div>
       </div>

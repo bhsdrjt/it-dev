@@ -76,7 +76,7 @@ function RouteDialog({ row, close, openTransaction, openTruckHistory }: {
     </div>
     <div className="anomaly-route-body">
       <p className="anomaly-route-target">SK <strong className="mono">{row.cdn ?? '—'}</strong> · Truck <strong className="mono">{row.truck ?? '—'}</strong></p>
-      <p className="helper">Analisa transaksi memakai SK; Timeline truck memakai truck, dengan rentang 3 jam sebelum dan 3 jam setelah waktu temuan. Tekan tombol muat pada halaman tujuan untuk menampilkan data.</p>
+      <p className="helper">Analisa transaksi memakai SK; Timeline truck memakai truck, dengan rentang 3 jam sebelum dan 5 jam setelah waktu temuan. Data dimuat otomatis saat halaman tujuan dibuka.</p>
       <div className="anomaly-route-actions">
         <button type="button" hidden={!can('transactions.view')} className="primary anomaly-route-transaction" disabled={!row.cdn} onClick={() => {
           if (!row.cdn) return;

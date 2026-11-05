@@ -67,7 +67,20 @@ Upgrade instalasi dengan `dbo.AuthAudit`: hentikan aplikasi, backup database, la
 
 Audit menyimpan ActorUserId, action, target identifier/filter pencarian yang diizinkan, OperationId, outcome, dan waktu UTC. Request operasional mencatat `started` sebelum handler, lalu `succeeded`/`failed`; timeout/error server pada mutasi menjadi `unknown` karena perubahan mungkin sudah diterapkan. Jika audit awal gagal, handler diblokir; jika audit akhir gagal, baris `started` tetap tersedia dan respons 503 meminta pemeriksaan sebelum retry mutasi. Error read/ping menjadi `failed`; sukses ping berarti pemeriksaan selesai, bukan semua PC online. Password, token, header, body utuh, respons, dan SQL tidak disalin ke audit. Tidak mencatat polling `/auth/me`, login gagal, logout lokal, request yang ditolak guard, atau klik menu frontend.
 
-Role awal: `admin`, `it_operator`, `transaction_operator`, `coal_editor`, dan `viewer`. Menu User dan akses tersedia untuk permission `access.manage`. Permission ekspor CSV mengatur tombol ekspor; user yang boleh membaca data tetap dapat menyalin data tersebut.
+Role awal: `admin`, `it_operator`, `transaction_operator`, `coal_editor`, dan `viewer`. Menu User dan akses tersedia untuk permission `access.manage`. Tab **Role & izin** menyediakan tombol **+ Tambah role**: nama wajib unik, maksimal 100 karakter tanpa karakter kontrol. Role baru tidak memiliki izin atau user; gunakan Atur izin dan Kelola user setelah dibuat. Endpoint `POST /auth/admin/roles` menerima `{ name }`, memakai `access.manage`, dan mencatat `role.create` bersama INSERT dalam satu transaksi. Nama duplikat ditolak HTTP 409; tidak memerlukan migrasi tabel. Permission ekspor CSV mengatur tombol ekspor; user yang boleh membaca data tetap dapat menyalin data tersebut.
+
+### Satu permission Import BioStar
+
+`biostar.import` memberikan akses seluruh Import BioStar: menu, pemeriksaan koneksi, upload, preview/detail, konfirmasi, mulai impor, pembatalan, dan laporan. Tidak ada lagi permission BioStar terpisah. Konfirmasi pekerjaan tetap wajib; permission tidak melewati validasi impor.
+
+Untuk upgrade:
+
+1. Hentikan backend lama dan backup `ITMonitor`.
+2. DBA menjalankan `sql/biostar-import-permission.sql` melalui SSMS sebelum menjalankan backend baru. Script bertransaksi dan bisa diulang; hanya role yang sebelumnya memiliki `biostar.import.start` mendapat izin baru otomatis. Role yang hanya memiliki izin lihat/upload/lainnya tidak dinaikkan haknya. Grant `biostar.import` yang sudah ada tetap dipertahankan. Delapan permission lama beserta relasi role-nya dihapus; permission lain tidak diubah.
+3. Periksa daftar role pada hasil script. Admin dapat memberikan `biostar.import` kepada role lain melalui **User dan akses**. Setup baru menyediakan permission tanpa grant otomatis.
+4. Jalankan backend baru dan muat ulang halaman agar daftar izin/menu diperbarui. API membaca izin terbaru setiap request. Backend lama tidak boleh dijalankan lagi karena akan membuat ulang permission lama.
+
+Migrasi tidak dijalankan otomatis saat startup dan memerlukan izin DBA untuk penghapusan permission, bukan penambahan hak runtime. Tanpa migrasi, permission lama masih muncul di pengaturan tetapi tidak memberi akses ke endpoint baru.
 
 Database berbeda tidak mengisolasi resource atau downtime instance. Script setup belum otomatis dijalankan oleh aplikasi.
 

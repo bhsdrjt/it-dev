@@ -18,7 +18,7 @@ for (const size of ['1920,1080', '1280,720', '390,844']) test(`BioStar layout an
     window.fetch = async (path, options = {}) => {
       if (options.method && options.method !== 'GET') throw Error('Fixture forbids writes');
       let data;
-      if (path === '/auth/me') data = { username: 'fixture', permissions: ['biostar.import.view'] };
+      if (path === '/auth/me') data = { username: 'fixture', permissions: ['biostar.import'] };
       else if (path === '/biostar/imports') { listRequests++; data = [structuredClone(job)]; }
       else if (path.endsWith('/detail')) { detailRequests++; data = { fingerprints: [{ sourceUsrUid: '1006', fngpIdx: 0 }], cards: [{ sourceCrdUid: '15', crdCsn: 'fixture-card' }], relations: [{ sourceUsrUid: '1006', sourceCrdUid: '15' }] }; }
       else throw Error('Unexpected fixture request: ' + path);

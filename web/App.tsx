@@ -181,7 +181,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles, displayName 
     updatePage(next);
   };
   const equipmentVisited = visited.has('equipment');
-  const [transactionCdn, setTransactionCdn] = useState('');
+  const [transactionTarget, setTransactionTarget] = useState<{ cdn: string } | null>(null);
   const [truckTarget, setTruckTarget] = useState<{ equipmentId: number; date: string; cdn: string | null; truck: string | null; eventAt: string } | null>(null);
   const [pcs, setPcs] = useState<Pc[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
@@ -316,7 +316,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles, displayName 
         <button hidden={!can('transactions.view')} aria-current={page === 'transactions' ? 'page' : undefined} onClick={() => setPage('transactions')}><MenuIcon name="transactions" /> Analisa transaksi</button>
         <button hidden={!can('timeline.view')} aria-current={page === 'truck-history' ? 'page' : undefined} onClick={() => setPage('truck-history')}><MenuIcon name="history" /> Timeline truck</button>
         <button hidden={!can('coal.view')} aria-current={page === 'coal-calory' ? 'page' : undefined} onClick={() => setPage('coal-calory')}><MenuIcon name="calory" /> Coal calory</button>
-        {can('biostar.import.view') && <button className="biostar-nav" aria-current={page === 'biostar-import' ? 'page' : undefined} onClick={() => setPage('biostar-import')}><MenuIcon name="import" /> Import Biostar</button>}
+        {can('biostar.import') && <button className="biostar-nav" aria-current={page === 'biostar-import' ? 'page' : undefined} onClick={() => setPage('biostar-import')}><MenuIcon name="import" /> Import Biostar</button>}
         {can('access.manage') && <button aria-current={page === 'access' ? 'page' : undefined} onClick={() => setPage('access')}><MenuIcon name="access" /> Manajemen akses</button>}
         {isAdmin && <button aria-current={page === 'audit' ? 'page' : undefined} onClick={() => setPage('audit')}><MenuIcon name="audit" /> User Audit</button>}
         <button hidden={!can('activity.view')} aria-current={page === 'activity' ? 'page' : undefined} onClick={() => setPage('activity')}><MenuIcon name="activity" /> Activity log</button>
@@ -528,7 +528,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles, displayName 
       </section>
       <section className="anomaly-view menu-page" hidden={page !== 'anomalies' || !can('monitoring.view')} aria-labelledby="anomalies-title">
         {visited.has('anomalies') && can('monitoring.view') && <AnomalyDashboard api={api} onOpenTransaction={selectedCdn => {
-          setTransactionCdn(selectedCdn);
+          setTransactionTarget({ cdn: selectedCdn });
           setPage('transactions');
         }} onOpenTruckHistory={target => {
           setTruckTarget(target);
@@ -536,7 +536,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles, displayName 
         }} />}
       </section>
       <section className="transactions-page menu-page" hidden={page !== 'transactions' || !can('transactions.view')} aria-labelledby="transactions-title">
-        {visited.has('transactions') && can('transactions.view') && <Transactions api={api} log={log} initialCdn={transactionCdn} />}
+        {visited.has('transactions') && can('transactions.view') && <Transactions api={api} log={log} initialTarget={transactionTarget} />}
       </section>
       <section className="transactions-page menu-page" hidden={page !== 'truck-history' || !can('timeline.view')} aria-labelledby="truck-history-title">
         {visited.has('truck-history') && can('timeline.view') && <TruckHistory api={api} initialTarget={truckTarget} />}
@@ -545,7 +545,7 @@ function Dashboard({ api, log, entries, logout, permissions, roles, displayName 
         {visited.has('coal-calory') && can('coal.view') && <CoalCalory api={api} log={log} />}
       </section>
       {page === 'access' && can('access.manage') && <AccessManagement api={api} />}
-      {page === 'biostar-import' && can('biostar.import.view') && <BiostarImport api={api} />}
+      {page === 'biostar-import' && can('biostar.import') && <BiostarImport api={api} />}
       {page === 'audit' && isAdmin && <UserAudit api={api} />}
     </main>
     {editor && <PcEditor pc={editor} locations={locations} disabled={!!errors.locations || busy.locations} api={api} log={log} close={() => setEditor(null)} saved={pc => {

@@ -7,7 +7,7 @@ const { join } = require('node:path');
 const { spawn } = require('node:child_process');
 const browser = process.env.CHROME_PATH || ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(existsSync);
 const viewer = ['equipment.view', 'coal.view', 'transactions.view', 'monitoring.view', 'timeline.view', 'activity.view'];
-const profiles = { viewer, mixed: ['equipment.view', 'equipment.ping', 'coal.view', 'coal.delete', 'transactions.view', 'transactions.copy_loading', 'transactions.restore', 'monitoring.view'], monitoring: ['monitoring.view'], equipment: ['equipment.view'], coal: ['coal.view'], none: [] };
+const profiles = { viewer, mixed: ['equipment.view', 'equipment.ping', 'coal.view', 'coal.delete', 'transactions.view', 'transactions.copy_loading', 'transactions.restore', 'monitoring.view'], monitoring: ['monitoring.view'], equipment: ['equipment.view'], coal: ['coal.view'], biostar: ['biostar.import'], legacyBiostar: ['biostar.import.view', 'biostar.import.start'], none: [] };
 for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Object.entries(profiles)) test(`permission layout ${name} ${size}`, { skip: !browser, timeout: 30000 }, async () => {
   const profile = await mkdtemp(join(process.env.TEMP ? join(process.env.TEMP, 'opencode') : process.cwd(), 'permission-layout-'));
   const script = `
@@ -22,12 +22,14 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
       check(!options.method || options.method === 'GET', 'fixture forbids writes');
       let data;
       if (path === '/auth/me') data = { username: 'fixture', permissions };
+      else if (path === '/biostar/imports') data = [];
       else if (path === '/apis') data = [{ id: 'one', apiName: 'Fixture API', ipAPI: '127.0.0.1', locationIDs: [7] }];
       else if (path.startsWith('/equipments')) data = [{ EquipmentID: 10, strTruckCN: 'TR-10' }];
       else if (path === '/locations') data = [{ LocationID: 7, strLocationName: 'Fixture location' }];
       else if (path === '/coal-calories') data = [{ CoalQualityAGMID: 1, CoalQualityID: 11, CoalQualityName: 'SEAM FIXTURE', Coalcalory: 5000, dtUpdatedAt: '2026-10-01T08:00:00' }];
       else if (path.startsWith('/anomalies?')) data = { anomalies: [{ id: 'one', code: 'KIRIM_TANPA_PASANGAN_7D', severity: 'critical', category: 'pairing', title: 'Fixture anomaly', detail: 'Fixture detail', cdn: 'FIXTURE', truck: 'TR-10', equipmentId: 10, loadingId: 1, dumpingId: null, eventAt: new Date().toISOString() }], queries: [] };
-      else if (path.startsWith('/transactions/timeline?')) data = { coalDeliveryNumber: 'FIXTURE', transactions: ['Kirim', 'Terima', 'Terima'].map((Transaksi, i) => ({ Transaksi, CTFinalTonnageID: i + 1, CoalDeliveryNumber: 'FIXTURE', RefDumpingTonnageID: null, dtLoaded: '2026-10-01T08:00:00', dtEmpty: '2026-10-01T09:00:00', dtDeletedAt: i === 2 ? '2026-10-02T08:00:00' : null })), activities: [] };
+      else if (path.startsWith('/transactions/truck-history?')) data = { equipmentId: 10, starttime: '2026-10-01T06:00:00', endtime: '2026-10-01T12:00:00', transactions: [], activities: [] };
+      else if (path.startsWith('/transactions/timeline?')) data = { coalDeliveryNumber: 'FIXTURE', transactions: ['Kirim', 'Terima', 'Terima'].map((Transaksi, i) => ({ Transaksi, CTFinalTonnageID: i + 1, CoalDeliveryNumber: 'FIXTURE', RefDumpingTonnageID: null, dtLoaded: '2026-10-01T08:00:00', dtEmpty: '2026-10-01T09:00:00', dtTimeCollected: '2026-10-01T08:00:00.000', UserName: 'dispatcher', dtDeletedAt: i === 2 ? '2026-10-02T08:00:00' : null })), activities: [] };
       else throw Error('Unexpected fixture request: ' + path);
       return { ok: true, json: async () => data };
     };
@@ -54,19 +56,23 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
           document.querySelector('.anomaly-open').click(); await tick();
           document.querySelector('.anomaly-route-transaction').click(); await tick();
           check(document.querySelector('#coal-delivery-number').value === 'FIXTURE', 'first transaction mount receives SK target');
-          check(calls.length === 2, 'SK target does not auto-submit');
+          check(calls.filter(path => path.startsWith('/transactions/timeline?')).length === 1 && document.querySelector('.transaction-summary').textContent.includes('FIXTURE'), 'first monitoring link auto-searches once');
           await open('Monitoring transaksi');
         }
         if (permissions.includes('timeline.view')) {
           document.querySelector('.anomaly-open').click(); await tick();
           document.querySelector('.anomaly-route-timeline').click(); await tick();
           check(document.querySelector('#history-truck').value === 'TR-10 · #10', 'first history mount receives truck target');
-          check(calls.length === 3 && calls[2] === '/equipments?activeOnly=true', 'truck target loads references without auto-submit');
+          check(calls.filter(path => path === '/equipments?activeOnly=true').length === 1 && calls.filter(path => path.startsWith('/transactions/truck-history?')).length === 1, 'first truck target loads references and automatically searches once');
         }
       }
       const nav = document.querySelector('.sidebar nav');
-      check([...nav.querySelectorAll('button')].filter(visible).length === permissions.filter(code => code.endsWith('.view')).length, 'sidebar excludes forbidden pages');
-      if (!permissions.length) {
+      check([...nav.querySelectorAll('button')].filter(visible).length === permissions.filter(code => code === 'biostar.import' || (code.endsWith('.view') && !code.startsWith('biostar.'))).length, 'sidebar excludes forbidden pages');
+      if (permissions.includes('biostar.import')) {
+        check(visible(document.querySelector('.biostar-import-page')), 'unified BioStar permission opens importer');
+        check(calls.includes('/biostar/imports'), 'unified permission loads import jobs');
+      }
+      if (!permissions.length || permissions.includes('biostar.import.view')) {
         check(!visible(nav), 'empty navigation hidden');
         check(document.querySelector('[role="status"]').textContent.includes('Belum ada izin'), 'no-permissions fallback');
         check(calls.length === 1 && calls[0] === '/auth/me', 'no unauthorized reads');
@@ -96,6 +102,20 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
         input.dispatchEvent(new Event('input', { bubbles: true })); await tick();
         input.closest('form').requestSubmit(); await tick(); layout();
         check(document.querySelector('.transaction-timeline'), 'timeline read data retained');
+        const trips = document.querySelectorAll('[aria-label="Ritase Kirim / Terima"] > .truck-trip');
+        check(trips.length === 3 && [...trips].every(trip => trip.querySelectorAll('.transaction-card').length === 1), 'same SK without reference stays in separate groups, including deleted receipt');
+        const receipt = [...document.querySelectorAll('.transaction-card')].find(card => card.querySelector('h3').textContent.trim() === 'Terima');
+        const detail = receipt.querySelector('.column-details > summary');
+        const titleBounds = receipt.querySelector('.transaction-title').getBoundingClientRect();
+        check(Math.abs(detail.getBoundingClientRect().top - titleBounds.top) < 2, 'read-only detail icon shares title row');
+        if (innerWidth >= 1000) {
+          const badges = receipt.querySelectorAll('.transaction-badges .status');
+          check(Math.abs(badges[0].getBoundingClientRect().top - badges[1].getBoundingClientRect().top) < 1, 'read-only dispatcher badge stays beside SK');
+          check(receipt.getBoundingClientRect().height < 105, 'read-only card has no empty detail row');
+        }
+        detail.click(); await tick();
+        check(receipt.querySelector('.column-details').open, 'read-only detail expands');
+        detail.click(); await tick();
         check(!visible(document.querySelector('[aria-label="Aksi Terima 2"]')), 'copy-only cannot open empty Terima menu');
         check(!visible(document.querySelector('[aria-label="Aksi Terima 3"]')), 'deleted row has no dead dropdown');
         const trigger = document.querySelector('[aria-label="Aksi Kirim 1"]');

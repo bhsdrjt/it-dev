@@ -8,5 +8,5 @@ export const usePermissions = () => {
 export const pagePermissions = {
   anomalies: 'monitoring.view', equipment: 'equipment.view', transactions: 'transactions.view',
   'truck-history': 'timeline.view', 'coal-calory': 'coal.view', activity: 'activity.view', access: 'access.manage',
-  'biostar-import': 'biostar.import.view',
+  'biostar-import': 'biostar.import',
 } as const;

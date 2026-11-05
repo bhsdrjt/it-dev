@@ -334,7 +334,7 @@ Semua endpoint memeriksa izin pekerjaan/target, bukan login saja. Konfirmasi dan
 
 ## 18. Keamanan
 
-- Izin khusus untuk upload, preview, konfirmasi, laporan.
+- Satu izin `biostar.import` untuk seluruh menu dan endpoint impor, termasuk upload, preview, konfirmasi, mulai, pembatalan, dan laporan. Konfirmasi/validasi pekerjaan tetap berlaku. Migrasi hanya memberi izin otomatis kepada role pemilik `biostar.import.start`; role lain ditetapkan admin.
 - Pembatasan pengguna/organisasi dan target yang diizinkan.
 - CSRF jika autentikasi cookie; rate limit upload/konfirmasi.
 - Paket di luar direktori publik dengan nama internal buatan backend.

@@ -137,6 +137,11 @@ export class AccessController {
     const sets = await this.db.roles();
     return { roles: sets[0], permissions: sets[1], rolePermissions: sets[2] };
   }
+  @Post('roles') createRole(@Req() request: AuthRequest, @Body() body: unknown) {
+    const { name } = object(body);
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f-\u009f]/.test(name)) throw new BadRequestException('Nama role wajib 1–100 karakter tanpa karakter kontrol.');
+    return this.db.createRole(request.auth.id, name.trim());
+  }
   @Post('users') create(@Req() request: AuthRequest, @Body() body: unknown) {
     const data = object(body);
     return this.db.createUser(request.auth.id, text(data.username, 'Username'), text(data.displayName, 'Nama'), password(data.password), ids(data.roleIds));

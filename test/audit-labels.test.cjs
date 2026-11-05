@@ -38,5 +38,7 @@ test('target summary uses stored scalar whitelist only; raw and legacy targets s
   assert.equal(auditTarget('12', 'user.update'), 'User #12');
   assert.equal(auditTarget('12', 'user.assign'), 'User #12');
   assert.equal(auditTarget('12', 'role.assign'), 'Role #12');
+  assert.equal(auditActivity('role.create', 'succeeded'), 'Tambah role');
+  assert.equal(auditTarget('biostar_operator', 'role.create'), 'Role: biostar_operator');
   assert.equal(auditTarget('123', 'user.create'), 'Username: 123');
 });

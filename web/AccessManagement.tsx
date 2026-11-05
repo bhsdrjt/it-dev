@@ -30,6 +30,7 @@ export function AccessManagement({ api }: { api: Api }) {
   const [users, setUsers] = useState<Users>({ users: [], userRoles: [] });
   const [roles, setRoles] = useState<Roles>({ roles: [], permissions: [], rolePermissions: [] });
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
@@ -45,11 +46,12 @@ export function AccessManagement({ api }: { api: Api }) {
     } finally { setLoading(false); }
   }, [api]);
   useEffect(() => { void load().catch(e => setError(e instanceof Error ? e.message : 'Gagal memuat akses.')); }, [load]);
-  async function save(path: string, method: string, body: unknown) {
-    if (busy || loading) return false;
+  async function save(path: string, method: string, body: unknown, confirmation = 'Simpan perubahan akses? Sesi user terkait dapat dibatalkan.') {
+    if (saving.current || loading) return false;
+    saving.current = true;
     setBusy(true);
     try {
-      if (!await confirmAction('Simpan perubahan akses? Sesi user terkait dapat dibatalkan.')) return false;
+      if (!await confirmAction(confirmation)) return false;
       setError(''); setNotice('');
       await api(path, method, body);
       setNotice('Perubahan akses tersimpan.');
@@ -59,7 +61,7 @@ export function AccessManagement({ api }: { api: Api }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Gagal menyimpan akses.');
       return false;
-    } finally { setBusy(false); }
+    } finally { saving.current = false; setBusy(false); }
   }
   const ids = (form: FormData, key: string) => form.getAll(key).map(Number);
   async function create(event: FormEvent<HTMLFormElement>) {
@@ -153,7 +155,23 @@ export function AccessManagement({ api }: { api: Api }) {
     </section>
     <section id="access-roles" className="access-section" aria-labelledby="access-roles-tab" hidden={tab !== 'roles' || !loaded || (loading && !busy)}>
       <section className="access-card" aria-labelledby="access-role-title">
-        <header className="access-card-heading"><h2 id="access-role-title">Role & izin workspace</h2><span className="access-total">{roles.permissions.length} izin</span></header>
+        <header className="access-card-heading"><h2 id="access-role-title">Role & izin workspace <span className="access-total">· {roles.permissions.length} izin</span></h2>
+          <AccessEditor title="Tambah role" icon="plus" disabled={disabled} error={error} notice={notice} onOpen={() => { setError(''); setNotice(''); }}>
+            <form className="access-form" onSubmit={async event => {
+              event.preventDefault();
+              if (saving.current || loading) return;
+              const element = event.currentTarget;
+              const name = String(new FormData(element).get('name') ?? '').trim();
+              if (!name || name.length > 100 || /[\x00-\x1F\x7F]/.test(name)) { setError('Nama role wajib diisi, maksimal 100 karakter tanpa karakter kontrol.'); return; }
+              if (await save('/auth/admin/roles', 'POST', { name }, `Tambah role ${name} tanpa izin? Izin dapat diatur setelah role dibuat.`)) element.reset();
+            }}><fieldset disabled={disabled}>
+              <legend>Role baru</legend>
+              <label>Nama role<input name="name" required maxLength={100} autoComplete="off" /></label>
+              <p className="helper">Nama harus unik. Role baru tidak memiliki izin; gunakan Atur izin setelah dibuat.</p>
+              <footer className="access-form-footer"><button className="primary" aria-busy={busy}>Tambah role</button></footer>
+            </fieldset></form>
+          </AccessEditor>
+        </header>
         <div className="access-list">
           {roles.roles.map(role => {
             const assigned = roles.rolePermissions.filter(link => link.roleId === role.id).map(link => link.permissionId);

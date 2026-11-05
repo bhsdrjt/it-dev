@@ -6,8 +6,8 @@ import { object, text } from './validation';
 
 @Controller('biostar/imports')
 @UseGuards(JwtGuard)
+@RequirePermissions('biostar.import')
 export class BiostarImportController {
-  @RequirePermissions('biostar.import.view')
   @Get('connection')
   async connection(): Promise<{ ok: boolean; target: string; message: string }> {
     const target = process.env.BIOSTAR_DB_SERVER || '(belum dikonfigurasi)';
@@ -23,7 +23,6 @@ export class BiostarImportController {
     }
   }
 
-  @RequirePermissions('biostar.import.upload')
   @Post()
   @UseInterceptors(FileInterceptor('zip'))
   async upload(@UploadedFile() zip: unknown, @Body() body: unknown): Promise<{ jobId: string; status: string; target: string }> {
@@ -46,19 +45,16 @@ export class BiostarImportController {
     return { jobId: job.id, status: job.status, target: job.target };
   }
 
-  @RequirePermissions('biostar.import.view')
   @Get()
   list(): ImportJob[] {
     return biostarService.listJobs();
   }
 
-  @RequirePermissions('biostar.import.view')
   @Get(':id')
   get(@Param('id') id: string): ImportJob {
     return biostarService.getJob(id);
   }
 
-  @RequirePermissions('biostar.import.view')
   @Get(':id/preview')
   preview(@Param('id') id: string, @Query('revision') revision?: unknown): ImportJob {
     const job = biostarService.getJob(id);
@@ -70,7 +66,6 @@ export class BiostarImportController {
     return job;
   }
 
-  @RequirePermissions('biostar.import.view')
   @Get(':id/detail')
   detail(@Param('id') id: string): { fingerprints: unknown[]; cards: unknown[]; relations: unknown[] } {
     const job = biostarService.getJob(id);
@@ -86,7 +81,6 @@ export class BiostarImportController {
     };
   }
 
-  @RequirePermissions('biostar.import.confirm')
   @Post(':id/confirm')
   async confirm(@Param('id') id: string, @Body() body: unknown): Promise<ImportJob> {
     const data = object(body);
@@ -95,19 +89,16 @@ export class BiostarImportController {
     return biostarService.confirm(id, revision);
   }
 
-  @RequirePermissions('biostar.import.cancel')
   @Post(':id/cancel')
   async cancel(@Param('id') id: string): Promise<ImportJob> {
     return biostarService.cancel(id);
   }
 
-  @RequirePermissions('biostar.import.start')
   @Post(':id/start')
   async start(@Param('id') id: string): Promise<void> {
     return biostarService.startImport(id);
   }
 
-  @RequirePermissions('biostar.import.report')
   @Get(':id/report')
   report(@Param('id') id: string): ImportJob {
     return biostarService.getReport(id);

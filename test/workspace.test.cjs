@@ -18,6 +18,10 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
     window.confirm = () => { throw Error('Native confirmation must not be used'); };
     let answerConfirmation = () => true;
     let requestDelay = 0;
+    let holdTimeline = false;
+    let releaseTimeline;
+    let holdHistory = false;
+    let releaseHistory;
     let upsertFails = false;
     let copyStatus = 200;
     let replayFails = false;
@@ -45,6 +49,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       }
       if (path.startsWith('/transactions/truck-history?')) {
         const query = new URL(path, location.origin).searchParams;
+        if (holdHistory) { holdHistory = false; await new Promise(resolve => { releaseHistory = resolve; }); }
         if (query.get('equipmentId') === '12') return { ok: false, status: 503, json: async () => ({ message: 'Database pusat tidak tersedia.' }) };
         const empty = query.get('equipmentId') === '11';
         return { ok: true, json: async () => ({ equipmentId: Number(query.get('equipmentId')), starttime: '2026-04-01T06:00:00.000Z', endtime: '2026-04-02T23:00:00.000Z', transactions: empty ? [] : query.get('equipmentId') === '333' ? Array.from({ length: 101 }, (_, index) => ({ Transaksi: 'Kirim', CTFinalTonnageID: index + 1, CoalDeliveryNumber: 'PAGE-' + (index + 1), dturutan: '2026-04-01T07:00:00.000Z' })) : [{ Transaksi: 'Kirim', CTFinalTonnageID: 71, RefDumpingTonnageID: 77, CoalDeliveryNumber: 'HISTORY-ONLY', dturutan: '2026-04-01T07:00:00.000Z', dtEmpty: '2026-04-01T06:00:00.000Z', dtLoaded: '2026-04-01T07:00:00.000Z', dtDeletedAt: null }, { Transaksi: 'RawTerima', CTFinalTonnageID: 72, dturutan: '2026-04-01T08:00:00.000Z', dtDeletedAt: '2026-04-02T09:00:00.000Z' }], activities: empty ? [] : [{ trans: 'Kirim - Kosong', dtTimeCollected: '2026-04-01T06:00:00.000Z', ReaderLocationName: 'HISTORY READER', flTonnage: 0 }] }) };
@@ -75,13 +80,23 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       if (path === '/transactions/raw-terima') return { ok: !replayFails, status: replayFails ? 503 : 201, json: async () => ({ message: replayFails ? 'Hasil belum dapat dipastikan' : 'RawTerima diproses' }) };
       if (path.startsWith('/transactions/timeline?')) {
         const number = new URL(path, location.origin).searchParams.get('coalDeliveryNumber');
+        if (holdTimeline) { holdTimeline = false; await new Promise(resolve => { releaseTimeline = resolve; }); }
+        if (number.startsWith('COVERAGE-')) {
+          const [finalCount, rawCount, activityCount] = number.slice(9).split('-').map(Number);
+          return { ok: true, json: async () => ({ coalDeliveryNumber: number,
+            transactions: [
+              ...Array.from({ length: finalCount }, (_, i) => ({ Transaksi: i % 2 ? 'Dumping' : 'Loading', CTFinalTonnageID: i + 1, CoalDeliveryNumber: 'OTHER', dtDeletedAt: i === 0 ? '2026-07-14T09:00:00' : null })),
+              ...Array.from({ length: rawCount }, (_, i) => ({ Transaksi: ['RawDumping', 'DumpingRaw', 'RawTerima'][i % 3], CTFinalTonnageID: i + 100, CoalDeliveryNumber: 'OTHER' })),
+            ], activities: Array.from({ length: activityCount }, () => ({ trans: 'New Assignment', CoalDeliveryNumber: null })),
+          }) };
+        }
         if (number === 'MISSING') return { ok: false, status: 404, json: async () => ({ message: 'Data tidak ditemukan untuk CoalDeliveryNumber tersebut.' }) };
         return { ok: true, json: async () => ({ coalDeliveryNumber: number, transactions: [
-          { Transaksi: 'Kirim', CTFinalTonnageID: 1, RefDumpingTonnageID: unlinked ? null : 2, CoalDeliveryNumber: number, strEquipmentName: 'TR-10', UserName: 'DISPATCHER01', dtEmpty: '2026-07-13T11:56:03.000Z', dtLoaded: '2026-07-13T13:36:29.000Z', dtTimeCollected: '2026-07-13T13:36:29.000Z', IsValid: false, IsAutoReconcile: false, IsManualReconcile: false, strStockPileName: 'PIT TEST', strDumpingLocationName: 'CRUSHER TEST' },
+          { Transaksi: 'Kirim', CTFinalTonnageID: 1, RefDumpingTonnageID: unlinked ? null : 2, CoalDeliveryNumber: number, strEquipmentName: 'TR-10', EquipmentID: 10, UserName: 'DISPATCHER01', dtEmpty: '2026-07-13T11:56:03.000Z', dtLoaded: '2026-07-13T13:36:29.000Z', dtTimeCollected: '2026-07-13T13:36:29.000Z', IsValid: false, IsAutoReconcile: false, IsManualReconcile: false, strStockPileName: 'PIT TEST', strDumpingLocationName: 'CRUSHER TEST' },
           { Transaksi: 'Terima', CTFinalTonnageID: 2, CoalDeliveryNumber: number, IsValid: false, dtDeletedAt: '2026-07-14T09:10:00.000Z' },
           { Transaksi: 'RawDumping', CTFinalTonnageID: 3, CoalDeliveryNumber: 'OTHER', IsValid: null, dtDeletedAt: '2026-07-14T09:10:00.000Z' },
           { Transaksi: 'RawDumping', CTFinalTonnageID: 4, CoalDeliveryNumber: 'OTHER', dtDeletedAt: null },
-        ], activities: [{ trans: 'Net Reader', ReaderLocationName: 'MT TEST', CoalDeliveryNumber: null, flTonnage: 0, dtTimeCollected: '2026-07-13T14:00:00.000Z' }, { trans: 'Tol Gate', ReaderLocationName: 'TOLL TEST', CoalDeliveryNumber: number }] }) };
+        ], activities: [{ trans: 'Net Reader', ReaderLocationName: 'MT TEST', CoalDeliveryNumber: null, flTonnage: 0, dtTimeCollected: '2026-07-13T14:00:00.000Z' }, { trans: 'New Assignment', strTruckCN: 'TR-10', dtTimeCollected: '2026-07-13T14:30:00.123Z', CoalDeliveryNumber: null, flTonnage: null, LoadingLocationName: 'ASSIGNMENT PIT', DumpingLocationName: 'ASSIGNMENT PORT', ReaderLocationName: null }, { trans: 'Tol Gate', ReaderLocationName: 'TOLL TEST', CoalDeliveryNumber: number }] }) };
       }
       const data = path === '/apis' ? pcs : path === '/equipments' ? [{ EquipmentID: 10, strTruckCN: 'TR-10' }, { EquipmentID: 11, strTruckCN: 'TR-11' }, { EquipmentID: 99, strTruckCN: 'DELETED' }, ...Array.from({ length: 30 }, (_, i) => ({ EquipmentID: 200 + i, strTruckCN: 'SCROLL-' + i }))] : path === '/locations' ? [7, 8].map(id => ({ LocationID: id, strLocationName: 'Lokasi ' + id })) : path.startsWith('/equipment-checks/location?') ? { locationID: path.includes('apiId=two') ? 8 : 7, locationName: 'Lokasi ditemukan', checkedLocationIDs: [7], message: 'Lookup selesai' } : path === '/equipment-checks/upsert' ? { message: 'Tersimpan' } : path === '/coal-calories' ? [
         { CoalQualityAGMID: 1, CoalQualityID: 11, CoalQualityName: 'SEAM B', Coalcalory: 5000, dtUpdatedAt: '2026-10-01T08:00:00.000Z' },
@@ -259,6 +274,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         change(cdn, 'AF260080419'); await tick();
         document.querySelector('.transaction-search').requestSubmit(); await tick();
         check(document.querySelector('.transaction-summary').textContent.includes('AF260080419'), 'CDN results loaded');
+        check([...document.querySelectorAll('.transaction-summary strong')].some(node => node.textContent.trim() === 'TR-10 #10'), 'analysis header shows truck and EquipmentID');
         const checkSubmenu = root => {
           const active = root.querySelector('.view-tabs button[aria-pressed="true"]');
           const style = getComputedStyle(active);
@@ -273,6 +289,10 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(document.querySelector('.transaction-timeline .transaction-meta').textContent.includes('ID 1'), 'Kirim card exposes CTFinalTonnageID without opening detail');
         const terimaCard = [...document.querySelectorAll('.transaction-timeline article')].find(node => node.querySelector('h3').textContent.trim() === 'Terima');
         check(terimaCard.querySelector('.transaction-meta').textContent.includes('ID 2'), 'Terima card exposes its ID too');
+        const tripGroups = document.querySelectorAll('[aria-label="Ritase Kirim / Terima"] > .truck-trip');
+        check(tripGroups.length === 1 && tripGroups[0].querySelectorAll('.transaction-card').length === 2, 'analysis groups referenced Kirim and Terima in one trip');
+        check(tripGroups[0].querySelector('.trip-heading').textContent.includes('Ritase 1 · SK AF260080419') && tripGroups[0].querySelector('.trip-heading').textContent.includes('Mulai 2026-07-13 11:56:03.000'), 'analysis trip header shows SK and start');
+        check(![...tripGroups[0].querySelectorAll('.transaction-card h3')].some(node => node.textContent.includes('Raw')), 'raw excluded from grouped final timeline');
         const firstCard = document.querySelector('.transaction-timeline article');
         const details = firstCard.querySelector('.transaction-details');
         const detailToggle = details.querySelector('summary');
@@ -291,8 +311,8 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(!/PIT TEST|CRUSHER TEST|IsValid|Auto reconcile|Manual reconcile/.test(summary.textContent), 'extra fields hidden outside details');
         check([...details.querySelectorAll('dt')].find(node => node.textContent.trim() === 'IsValid').nextElementSibling.textContent.trim() === 'false', 'false value retained in details');
         const badges = firstCard.querySelectorAll('.transaction-badges .status');
-        check(badges.length === 2 && badges[0].textContent.includes('SK dicari') && badges[1].textContent.includes('created by dispatcher : DISPATCHER01'), 'dispatcher marker directly below searched SK badge with UserName');
-        check(badges[1].getBoundingClientRect().top >= badges[0].getBoundingClientRect().bottom, 'dispatcher badges stack vertically');
+        check(badges.length === 2 && badges[0].textContent.includes('SK dicari') && badges[1].textContent.includes('created by dispatcher : DISPATCHER01'), 'dispatcher marker next to searched SK badge with UserName');
+        if (innerWidth >= 1000) check(Math.abs(badges[1].getBoundingClientRect().top - badges[0].getBoundingClientRect().top) < 1 && badges[1].getBoundingClientRect().left >= badges[0].getBoundingClientRect().right, 'dispatcher badges share one row');
         check(document.querySelectorAll('.transaction-timeline .deleted-record').length === 1, 'only non-null deletion date marked');
         check(document.querySelector('.transaction-timeline .deleted-status').textContent.includes('Sudah dihapus') && document.querySelector('.transaction-timeline .deleted-status').textContent.includes('2026-07-14 09:10:00.000'), 'deleted transaction shows status and date');
         const card = document.querySelector('.transaction-timeline article');
@@ -370,6 +390,13 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         button('Aktivitas truck').click(); await tick();
         const activityTrips = document.querySelectorAll('.truck-trip');
         check(activityTrips.length === 2 && document.querySelector('.truck-trips').textContent.includes('MT TEST') && document.querySelector('.truck-trips').textContent.includes('Tol Gate'), 'reader activity grouped into trip cards');
+        const assignment = document.querySelector('.activity-stage-7');
+        check(assignment && assignment.querySelector('h3').textContent.includes('New Assignment'), 'assignment has dedicated event card');
+        const assignmentFields = assignment.querySelector('.transaction-times').textContent;
+        check(assignmentFields.includes('2026-07-13 14:30:00.123') && assignmentFields.includes('TR-10'), 'assignment time and truck preserved');
+        check(assignmentFields.includes('Assignment Loading ASSIGNMENT PIT') && assignmentFields.includes('Assignment Dumping ASSIGNMENT PORT'), 'assignment locations follow supplied SQL union positions');
+        check(!assignmentFields.includes('Tonase') && !assignment.querySelector('button'), 'assignment has no weighing field or mutation action');
+        check(!document.querySelector('.truck-trips').textContent.includes('Jenis aktivitas belum dikenali'), 'assignment not marked unknown');
         check([...activityTrips].every(node => node.querySelector('.trip-heading h3').textContent.includes('Ritase')), 'each activity group labels its ritase');
         check([...document.querySelectorAll('.activity-card')].some(node => node.querySelector('.status')?.textContent === 'SK dicari'), 'searched SK badge retained in activity groups');
         const highlightedActivity = document.querySelector('.truck-trip li.trip-highlight article');
@@ -524,10 +551,31 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         document.querySelector('.card-actions-options .danger').click(); await tick();
         const deletion = calls.find(row => row.path === '/transactions/delete');
         check(deletion.body.kind === 'Kirim' && deletion.body.tonnageId === 1 && deletion.body.confirmed, 'delete sends selected kind and ID');
+        for (const [counts, expected] of [
+          ['9-9-29', []], ['10-0-0', ['Kirim / Terima (gabungan): 10']],
+          ['0-10-0', ['TerimaRaw: 10']], ['0-0-30', ['Aktivitas truck: 30']],
+          ['11-11-31', ['Kirim / Terima (gabungan): 11', 'TerimaRaw: 11', 'Aktivitas truck: 31']], ['0-0-0', []],
+        ]) {
+          change(cdn, 'COVERAGE-' + counts); await tick();
+          document.querySelector('.transaction-search').requestSubmit(); await tick();
+          const coverage = document.querySelector('[aria-label="Cakupan hasil procedure"]');
+          check(coverage && coverage.textContent.includes('Data yang tidak muncul belum tentu tidak ada'), 'coverage caveat remains below threshold and for empty results');
+          check(coverage.classList.contains('transaction-coverage-warning') === !!expected.length, 'warning matches threshold: ' + counts);
+          check(expected.every(text => coverage.textContent.includes(text)), 'warning uses all SK, deleted rows, raw aliases and assignments: ' + counts);
+          for (const label of ['Kirim / Terima (gabungan):', 'TerimaRaw:', 'Aktivitas truck:']) {
+            check(coverage.textContent.includes(label) === expected.some(text => text.startsWith(label)), 'only reached limits listed: ' + label);
+          }
+          for (const tab of document.querySelectorAll('[aria-label="Hasil analisa transaksi"] button')) {
+            tab.click(); await tick();
+            check(coverage.getBoundingClientRect().height > 0, 'coverage visible across all tabs');
+          }
+          check(document.documentElement.scrollWidth <= innerWidth, 'coverage does not overflow viewport');
+        }
         change(cdn, 'MISSING'); await tick();
         document.querySelector('.transaction-search').requestSubmit(); await tick();
         check(document.querySelector('.transaction-workspace [role="alert"]').textContent.includes('tidak ditemukan'), 'not found shown');
         check(!document.querySelector('.transaction-results'), 'old results cleared after failure');
+        check(!document.querySelector('.transaction-coverage'), 'coverage removed with failed search results');
         const beforeHistory = calls.length;
         button('Timeline truck').click(); await tick();
         check(calls.length === beforeHistory + 1 && calls.at(-1).path === '/equipments?activeOnly=true', 'first history opening loads reference only, not transactions');
@@ -553,6 +601,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(historyQuery.get('equipmentId') === '10' && historyQuery.get('starttime').startsWith('2026-04-01T06:00') && historyQuery.get('endtime').startsWith('2026-04-02T23:00'), 'truck history sends selected ID and unshifted time');
         history = document.querySelector('.truck-history');
         check(history.textContent.includes('HISTORY-ONLY') && history.textContent.includes('2026-04-01 07:00:00.000'), 'history shows procedure transactions in database time');
+        check(history.querySelector('.transaction-summary strong').textContent === 'TR-10 #10', 'truck timeline header shows truck and EquipmentID');
         const checkHistoryDetailPosition = () => {
           for (const card of history.querySelectorAll('.transaction-timeline article')) {
             const cardBounds = card.getBoundingClientRect();
@@ -632,18 +681,63 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         anomalyAction.click(); await tick();
         const routeDialog = document.querySelector('.anomaly-route-modal[open]');
         check(routeDialog && routeDialog.textContent.includes('AB260029085') && routeDialog.textContent.includes('TR10040'), 'anomaly action opens destination chooser with target');
+        const timelineReads = () => calls.filter(call => call.path.startsWith('/transactions/timeline?')).length;
+        const beforeDeepLink = timelineReads();
         routeDialog.querySelector('.anomaly-route-transaction').click(); await tick();
         check(!document.querySelector('.transactions-page').hidden && document.querySelector('#coal-delivery-number').value === 'AB260029085' && !document.querySelector('.anomaly-route-modal[open]'), 'anomaly action deep-links SK into transaction analysis');
+        check(timelineReads() === beforeDeepLink + 1 && document.querySelector('.transaction-summary').textContent.includes('AB260029085'), 'monitoring link automatically loads target once');
+        button('Monitoring transaksi').click(); await tick();
+        const sameCdnAction = [...document.querySelectorAll('.anomaly-table .anomaly-open')].find(btn => btn.closest('tr').textContent.includes('AB260029085'));
+        sameCdnAction.click(); await tick();
+        document.querySelector('.anomaly-route-transaction').click(); await tick();
+        check(timelineReads() === beforeDeepLink + 2 && document.querySelector('.transaction-summary').textContent.includes('AB260029085'), 'reopening same SK reloads automatically');
+        button('Monitoring transaksi').click(); await tick();
+        sameCdnAction.click(); await tick();
+        holdTimeline = true;
+        document.querySelector('.anomaly-route-transaction').click(); await tick();
+        check(document.querySelector('.transaction-workspace [aria-busy="true"]'), 'automatic search shows loading');
+        button('Monitoring transaksi').click(); await tick();
+        [...document.querySelectorAll('.anomaly-table .anomaly-open')].find(btn => btn.closest('tr').textContent.includes('AB260029195')).click(); await tick();
+        document.querySelector('.anomaly-route-transaction').click(); await tick();
+        check(timelineReads() === beforeDeepLink + 4 && document.querySelector('.transaction-summary').textContent.includes('AB260029195'), 'new monitoring target replaces pending search');
+        releaseTimeline(); await tick();
+        check(document.querySelector('.transaction-summary').textContent.includes('AB260029195'), 'late old response cannot overwrite newest result');
+        button('Monitoring transaksi').click(); await tick();
+        button('Analisa transaksi').click(); await tick();
+        check(timelineReads() === beforeDeepLink + 4, 'sidebar return does not trigger automatic search');
         button('Monitoring transaksi').click(); await tick();
         const anomalyAction2 = [...document.querySelectorAll('.anomaly-table .anomaly-open')].find(btn => btn.closest('tr').textContent.includes('AB260029085'));
         anomalyAction2.click(); await tick();
+        const historyReads = () => calls.filter(call => call.path.startsWith('/transactions/truck-history?'));
+        const beforeHistoryLink = historyReads().length;
         document.querySelector('.anomaly-route-timeline').click(); await tick();
+        check(historyReads().length === beforeHistoryLink + 1, 'monitoring truck target automatically searches once');
+        const automaticQuery = new URL(historyReads().at(-1).path, location.origin).searchParams;
+        check(automaticQuery.get('equipmentId') === '444' && automaticQuery.get('starttime') === '2026-10-27T06:01:30' && automaticQuery.get('endtime') === '2026-10-27T14:01:30', 'automatic truck search uses target ID and window from three hours before to five hours after');
         check(!document.querySelector('.truck-history').parentElement.hidden && document.querySelector('#history-truck').value === 'TR10040 · #444', 'anomaly action deep-links truck into timeline');
         check(document.querySelector('#history-start').value === '27/10/2026' && document.querySelector('#history-end').value === '27/10/2026', 'anomaly action fills timeline with finding date');
         const startSelect = document.querySelectorAll('#history-start-time select');
         const endSelect = document.querySelectorAll('#history-end-time select');
-        check(startSelect[0].value === '06' && startSelect[1].value === '01' && endSelect[0].value === '12' && endSelect[1].value === '01', 'timeline window is 3 hours before and after finding time');
+        check(startSelect[0].value === '06' && startSelect[1].value === '01' && endSelect[0].value === '14' && endSelect[1].value === '01', 'timeline window is 3 hours before and 5 hours after finding time');
         check(document.querySelector('.anomaly-target-note').textContent.includes('AB260029085') && !document.querySelector('.anomaly-route-modal[open]'), 'timeline keeps anomaly context and closes chooser');
+        button('Monitoring transaksi').click(); await tick();
+        anomalyAction2.click(); await tick();
+        document.querySelector('.anomaly-route-timeline').click(); await tick();
+        check(historyReads().length === beforeHistoryLink + 2, 'same truck target reloads on repeated monitoring click');
+        button('Monitoring transaksi').click(); await tick();
+        anomalyAction2.click(); await tick();
+        holdHistory = true;
+        document.querySelector('.anomaly-route-timeline').click(); await tick();
+        check(document.querySelector('.truck-history [aria-busy="true"]'), 'automatic truck search shows loading');
+        button('Monitoring transaksi').click(); await tick();
+        [...document.querySelectorAll('.anomaly-table .anomaly-open')].find(btn => btn.closest('tr').textContent.includes('AB260029195')).click(); await tick();
+        document.querySelector('.anomaly-route-timeline').click(); await tick();
+        check(historyReads().length === beforeHistoryLink + 4 && document.querySelector('.truck-history .transaction-summary').textContent.includes('#461'), 'new truck target replaces pending request');
+        releaseHistory(); await tick();
+        check(document.querySelector('.truck-history .transaction-summary').textContent.includes('#461'), 'stale truck response ignored');
+        button('Monitoring transaksi').click(); await tick();
+        button('Timeline truck').click(); await tick();
+        check(historyReads().length === beforeHistoryLink + 4, 'sidebar return does not automatically reload truck history');
         button('Equipment checks').click(); await tick();
         check(!document.querySelector('.equipment-page').hidden, 'return to equipment');
         check(!document.querySelector('.equipment-page:not(.activity-page)').hidden && !document.querySelector('.registry').hidden, 'equipment returns directly to API registry');

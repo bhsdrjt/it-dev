@@ -50,6 +50,33 @@ const next = { ...loading, CTFinalTonnageID: 11, RefDumpingTonnageID: 21, CoalDe
 const event = (trans, time, extra = {}) => ({ trans, strTruckCN: 'TR1', dtTimeCollected: at(time), CoalDeliveryNumber: null, ...extra });
 const events = [event('Kirim - Kosong', '10:00'), event('Net Reader', '10:30', { ReaderLocationName: 'MT01' }), event('Kirim - Muat', '11:00', { CoalDeliveryNumber: 'TARGET' }), event('Tol Gate', '11:20'), event('Tol Gate', '11:40'), event('Terima - Muat', '12:00'), event('Terima - Kosong', '12:30')];
 const codes = findings => findings.map(item => item.code);
+test('New Assignment stays visible without changing stages, trip boundaries or pairing', () => {
+  const assignment = Object.freeze(event('New Assignment', '11:30', { LoadingLocationName: 'PIT A', DumpingLocationName: 'PORT B', ReaderLocationName: null }));
+  const baseline = analyzeTransactions([loading, dumping], events, 'TARGET');
+  const result = analyzeTransactions([loading, dumping], Object.freeze([...events, assignment]), 'TARGET');
+  assert.deepEqual(result.pairs, baseline.pairs);
+  assert.deepEqual(result.journeys[0].counts, baseline.journeys[0].counts);
+  assert.equal(result.journeys[0].start, baseline.journeys[0].start);
+  assert.equal(result.journeys[0].end, baseline.journeys[0].end);
+  assert.ok(result.journeys[0].candidates.some(item => item.row === assignment && item.stage === null));
+  assert.ok(!codes(result.journeys[0].findings).includes('unknown-events'));
+  const group = groupTruckActivities([...events, assignment])[0];
+  assert.equal(group.status, 'Lengkap');
+  assert.equal(group.rows[4], assignment);
+  const outside = [event('New Assignment', '09:00'), event('New Assignment', '12:40'), { trans: 'New Assignment', dtTimeCollected: null }];
+  const groups = groupTruckActivities([...events, ...outside]);
+  assert.equal(groups.length, 4);
+  for (const index of [0, 2, 3]) {
+    assert.equal(groups[index].status, 'Perubahan assignment');
+    assert.ok(!groups[index].notes.some(note => /Tahap belum|Jenis aktivitas/.test(note)));
+  }
+  assert.match(groups[3].notes[0], /Waktu tidak valid/);
+  assert.equal(groups.flatMap(group => group.rows).length, events.length + outside.length);
+  assert.equal(compiled.exports.isNewAssignment({ trans: ' NEW_ASSIGNMENT ' }), true);
+  assert.equal(compiled.exports.isNewAssignment({ trans: 'Other' }), false);
+  assert.equal(groupTruckActivities([...events, event('Other', '11:30')])[0].status, 'Urutan perlu diperiksa');
+});
+
 test('Net Reader at CP locations is MT; repeated readings before loading are valid', () => {
   const readings = ['CP 10', 'CP 09', 'CP 10'].map((ReaderLocationName, i) => event(i === 1 ? 'NetReader' : 'Net Reader', `10:${20 + i}`, { ReaderLocationName }));
   for (const row of readings) assert.equal(activityStage(row), 1);

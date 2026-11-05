@@ -4,6 +4,7 @@ const actions: Record<string, string> = {
   'user.update': 'Ubah user',
   'user.assign': 'Atur role user',
   'role.assign': 'Atur izin role',
+  'role.create': 'Tambah role',
   'GET /auth/admin/users': 'Lihat daftar user',
   'GET /auth/admin/roles': 'Lihat role dan izin',
   'GET /apis': 'Lihat daftar PC',
@@ -55,6 +56,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 export function auditTarget(target: string, action: string): string {
   if (action === 'user.create') return target ? `Username: ${target}` : '—';
+  if (action === 'role.create') return target ? `Role: ${target}` : '—';
   if (['auth.login', 'user.update', 'user.assign', 'role.assign'].includes(action) && /^\d+$/.test(target)) {
     return `${action === 'role.assign' ? 'Role' : 'User'} #${target}`;
   }

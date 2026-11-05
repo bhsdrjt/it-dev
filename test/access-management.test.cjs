@@ -22,6 +22,11 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
       if (options.method === 'PUT' || options.method === 'POST') {
         writes.push({ path, body: JSON.parse(options.body) });
         if (failSave) return { ok: false, status: 400, json: async () => ({ message: 'Fixture save failed' }) };
+        if (path === '/auth/admin/roles' && options.method === 'POST') {
+          const { name } = JSON.parse(options.body);
+          if (roles.some(role => role.name === name)) return { ok: false, status: 409, json: async () => ({ message: 'Nama role sudah digunakan.' }) };
+          roles.push({ id: roles.length + 1, name });
+        }
         return { ok: true, json: async () => ({}) };
       }
       if (holdReads && ['/auth/admin/users', '/auth/admin/roles'].includes(path)) await new Promise(resolve => pendingReads.push(resolve));
@@ -90,6 +95,16 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
           check(createModal.querySelector('input[name="password"]').minLength === 12, 'new user password validation retained');
           createModal.querySelector('[aria-label="Tutup"]').click(); await tick();
           check(document.activeElement === add, 'create close restores focus');
+          document.querySelector('#access-roles-tab').click(); await tick();
+          const addRole = page.querySelector('button[aria-label="Tambah role"]');
+          check(addRole.textContent === '' && addRole.querySelector('svg') && addRole.title === 'Tambah role', 'add role is accessible plus icon');
+          addRole.focus(); addRole.click(); await tick();
+          const newRoleModal = page.querySelector('.access-modal[open]');
+          check(newRoleModal.matches(':modal') && newRoleModal.contains(document.activeElement), 'role dialog traps focus');
+          check(newRoleModal.querySelector('[name="name"]').maxLength === 100 && newRoleModal.querySelector('[name="name"]').required, 'role name constrained');
+          layout(newRoleModal.querySelector('.access-modal-body'));
+          newRoleModal.querySelector('[aria-label="Tutup"]').click(); await tick();
+          check(document.activeElement === addRole, 'role dialog close restores focus');
           check(getComputedStyle(page.querySelector('.access-card')).backgroundColor === (theme === 'dark' ? 'rgb(26, 33, 41)' : 'rgb(255, 255, 255)'), 'card uses theme surface');
           for (const section of ['users', 'roles']) {
             document.querySelector('#access-' + section + '-tab').click(); await tick();
@@ -172,6 +187,43 @@ for (const size of ['1280,720', '390,844']) test(`access forms remain reachable 
         check(createForm.querySelector('[name="password"]').value === '' && createForm.querySelector('[name="username"]').value === '', 'successful create resets form and password');
         check(createModal.querySelector('[role="status"]').textContent.includes('tersimpan'), 'create success visible inside modal');
         createModal.querySelector('[aria-label="Tutup"]').click(); await tick();
+        document.querySelector('#access-roles-tab').click(); await tick();
+        const addRole = page.querySelector('button[aria-label="Tambah role"]');
+        addRole.click(); await tick();
+        const newRoleModal = page.querySelector('.access-modal[open]');
+        const roleForm = newRoleModal.querySelector('form');
+        const roleName = roleForm.querySelector('[name="name"]');
+        const beforeRoles = writes.length;
+        roleName.value = '   '; roleForm.requestSubmit(); await tick();
+        check(newRoleModal.querySelector('[role="alert"]') && writes.length === beforeRoles, 'blank role rejected without request');
+        roleName.value = '  biostar_operator  ';
+        roleForm.querySelector('button').focus(); roleForm.requestSubmit(); roleForm.requestSubmit(); await tick();
+        check(newRoleModal.querySelectorAll('.confirm-modal:modal').length === 1, 'double submit opens one confirmation');
+        newRoleModal.querySelector('.confirm-actions button').click(); await tick();
+        check(writes.length === beforeRoles && roleName.value.includes('biostar_operator'), 'cancel role leaves draft without write');
+        failSave = true;
+        roleForm.querySelector('button').focus(); roleForm.requestSubmit(); await tick();
+        newRoleModal.querySelector('.confirm-actions .primary').click(); await tick();
+        check(newRoleModal.querySelector('[role="alert"]').textContent.includes('Fixture save failed') && roleName.value.includes('biostar_operator'), 'failed role creation preserves draft');
+        failSave = false;
+        roleForm.querySelector('button').focus(); roleForm.requestSubmit(); await tick();
+        holdReads = true;
+        newRoleModal.querySelector('.confirm-actions .primary').click(); await tick();
+        check(roleName.disabled || roleName.matches(':disabled'), 'role form locked while reloading');
+        newRoleModal.dispatchEvent(new Event('cancel', { cancelable: true }));
+        check(newRoleModal.open, 'role dialog cannot close while saving');
+        releaseReads(); await tick();
+        check(writes.at(-1).path === '/auth/admin/roles' && JSON.stringify(writes.at(-1).body) === JSON.stringify({ name: 'biostar_operator' }), 'role creation sends trimmed name only');
+        check(roleName.value === '' && newRoleModal.querySelector('[role="status"]').textContent.includes('tersimpan'), 'role creation resets form with feedback');
+        const created = [...page.querySelectorAll('.access-role-record')].find(node => node.textContent.includes('biostar_operator'));
+        check(created && created.textContent.includes('0 user') && created.textContent.includes('0 dari'), 'new role appears without users or permissions');
+        roleName.value = 'biostar_operator'; roleForm.querySelector('button').focus(); roleForm.requestSubmit(); await tick();
+        newRoleModal.querySelector('.confirm-actions .primary').click(); await tick();
+        check(newRoleModal.querySelector('[role="alert"]').textContent.includes('Nama role sudah digunakan.'), 'duplicate role error shown inside dialog');
+        newRoleModal.querySelector('[aria-label="Tutup"]').click(); await tick();
+        document.querySelector('#access-users-tab').click(); await tick();
+        page.querySelector('button[aria-label="Tambah user"]').click(); await tick();
+        check(page.querySelector('.access-modal[open]').textContent.includes('biostar_operator'), 'created role available for user assignment');
         document.body.dataset.testResult = 'passed';
       } catch (error) { document.body.dataset.testResult = 'failed: ' + error.message; }
     });

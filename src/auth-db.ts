@@ -47,11 +47,7 @@ export class AuthDbService implements OnModuleDestroy, OnModuleInit {
     await this.seedPermissions();
   }
   private async seedPermissions() {
-    const permissions = [
-      'biostar.import.view', 'biostar.import.upload', 'biostar.import.mapping',
-      'biostar.import.validate', 'biostar.import.confirm', 'biostar.import.cancel',
-      'biostar.import.start', 'biostar.import.report',
-    ];
+    const permissions = ['biostar.import'];
     try {
       const existing = await this.connect().then(pool => pool.request()
         .query("SELECT Name FROM dbo.AuthPermissions WHERE Name IN ('" + permissions.join("','") + "')"));
@@ -130,10 +126,17 @@ export class AuthDbService implements OnModuleDestroy, OnModuleInit {
       return result;
     } catch (error) {
       await tx.rollback().catch(() => undefined);
-      if (error instanceof sql.RequestError && (error.number === 2601 || error.number === 2627)) throw new ConflictException('Username sudah digunakan.');
+      if (error instanceof sql.RequestError && (error.number === 2601 || error.number === 2627)) throw new ConflictException(action === 'role.create' ? 'Nama role sudah digunakan.' : 'Username sudah digunakan.');
       if (error instanceof sql.RequestError && error.number === 547) throw new BadRequestException('User, role, atau permission tidak valid.');
       unavailable(error);
     }
+  }
+  async createRole(actor: number, name: string) {
+    return this.mutate(actor, 'role.create', name, async tx => {
+      const result = await new sql.Request(tx).input('name', sql.NVarChar(100), name)
+        .query('INSERT dbo.AuthRoles(Name) OUTPUT inserted.Id AS id VALUES(@name)');
+      return { id: result.recordset[0].id as number };
+    });
   }
   async createUser(actor: number, username: string, displayName: string, password: string, roleIds: number[]) {
     const hash = await passwordHash(password);

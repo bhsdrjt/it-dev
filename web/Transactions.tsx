@@ -1,12 +1,12 @@
 import { usePermissions } from './permissions';
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Combobox } from './Combobox';
 import { confirmAction } from './confirm-action';
 import { Icon } from './Icon';
 import { ActionIcon, Details, cell, date, value } from './TransactionCard';
 import { TruckActivities } from './TruckActivities';
 import { SkeletonPanel } from './SkeletonPanel';
-import { analyzeTransactions, dispatcherLabel, groupTruckActivities, isDispatcherCreated, sameCdn, stages, transactionKind, type Row } from './transaction-analysis';
+import { analyzeTransactions, dispatcherLabel, groupTruckActivities, groupTruckTransactions, isDispatcherCreated, isNewAssignment, sameCdn, stages, transactionKind, type Row } from './transaction-analysis';
 type Result = {
   coalDeliveryNumber: string;
   transactions: Row[];
@@ -15,7 +15,7 @@ type Result = {
 type Props = {
   api: <T>(path: string, method?: string, body?: unknown, signal?: AbortSignal) => Promise<T>;
   log: (level: 'ok' | 'err' | 'info', message: string, note?: string) => void;
-  initialCdn?: string;
+  initialTarget?: { cdn: string } | null;
 };
 const isDeleted = (row: Row) => row.dtDeletedAt !== null && row.dtDeletedAt !== undefined;
 function DeletedStatus({ row, label = 'Sudah dihapus' }: {
@@ -213,10 +213,10 @@ function SalinMuatanModal({ api, row, busy, close, submit, submitKeTerimaAda }: 
     </form>
   </dialog>;
 }
-export function Transactions({ api, log, initialCdn = '' }: Props) {
+export function Transactions({ api, log, initialTarget = null }: Props) {
   const can = usePermissions();
   const [relationRow, setRelationRow] = useState<Row | null>(null);
-  const [cdn, setCdn] = useState(initialCdn);
+  const [cdn, setCdn] = useState(initialTarget?.cdn ?? '');
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -234,22 +234,13 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
   // Baris yang sedang diproses; loading hanya pada baris itu, bukan semua kartu.
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [tab, setTab] = useState<'timeline' | 'raw' | 'activity' | 'analysis'>('timeline');
-  // Deep-link dari dashboard hanya mengisi SK; operator tetap memilih Analisa transaksi.
-  useEffect(() => {
-    if (!initialCdn) return;
-    setCdn(initialCdn);
-    setResult(null);
-    setError('');
-    setTab('timeline');
-  }, [initialCdn]);
   // Ref mencegah submit ganda; abort saat unmount mencegah respons lama mengisi halaman.
   // Membatalkan browser tidak menjamin stored procedure di server ikut berhenti.
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  const search = useCallback(async (searchCdn: string) => {
     if (pending.current || promotionPending.current || releasePending.current || salinPending.current) return;
-    const number = cdn.trim();
+    const number = searchCdn.trim();
     setError('');
     setResult(null);
     if (!/^[\x20-\x7E]{1,50}$/.test(number)) {
@@ -281,6 +272,25 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
         setBusy(false);
       }
     }
+  }, [api, log]);
+  // Objek target baru untuk setiap klik Monitoring, termasuk SK yang sama.
+  const consumedTarget = useRef<Props['initialTarget']>(null);
+  useEffect(() => {
+    if (!initialTarget || consumedTarget.current === initialTarget || promoting || releasing || salining) return;
+    // Jangan menimpa refresh hasil mutasi yang masih berjalan.
+    if (promotionPending.current || releasePending.current || salinPending.current) return;
+    consumedTarget.current = initialTarget;
+    pending.current?.abort();
+    pending.current = null;
+    setBusy(false);
+    setCdn(initialTarget.cdn);
+    setRelationRow(null);
+    setSalinRow(null);
+    void search(initialTarget.cdn);
+  }, [initialTarget, promoting, releasing, salining, search]);
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void search(cdn);
   }
   async function reloadTimeline(searchCdn: string) {
     try {
@@ -485,12 +495,20 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
   // Pisahkan tampilan final/raw, tetapi analisa tetap menerima snapshot lengkap.
   // CDN pembanding diperlukan untuk mendeteksi referensi milik ritase lain.
   const transactions = result?.transactions.filter(row => transactionKind(row) !== 'TerimaRaw') || [];
+  const transactionGroups = groupTruckTransactions(transactions);
   const raw = result?.transactions.filter(row => transactionKind(row) === 'TerimaRaw') || [];
   const target = result?.transactions.filter(row => sameCdn(row, result.coalDeliveryNumber)) || [];
   const columns = [...new Set(raw.flatMap(row => Object.keys(row)))];
   const activities = result?.activities || [];
+  // ponytail: ambang dari definisi procedure operator; gunakan metadata server jika tersedia.
+  const reachedLimits = [
+    { label: 'Kirim / Terima (gabungan)', count: transactions.filter(row => ['Kirim', 'Terima'].includes(transactionKind(row))).length, limit: 10 },
+    { label: 'TerimaRaw', count: raw.length, limit: 10 },
+    { label: 'Aktivitas truck', count: activities.length, limit: 30 },
+  ].filter(item => item.count >= item.limit);
   const activityGroups = groupTruckActivities(activities);
   const targetRow = target[0];
+  const truckRow = targetRow?.strEquipmentName ? targetRow : result?.transactions[0];
   const analysis = result ? analyzeTransactions(result.transactions, activities, result.coalDeliveryNumber) : null;
   const unpaired = new Set(analysis?.pairs.flatMap(pair => pair.unpairedDumping ? [pair.loading, pair.unpairedDumping] : []) || []);
   const beforeCdn = new Set(analysis?.journeys.flatMap(journey => journey.candidates.filter(event => event.basis === 'Urutan sebelum SK terbit').map(event => event.row)) || []);
@@ -536,7 +554,7 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
         <div>
           <span>Truck</span>
           <strong>
-            {value(targetRow?.strEquipmentName || result.transactions[0]?.strEquipmentName || activities[0]?.strTruckCN)}
+            {value(truckRow?.strEquipmentName || activities[0]?.strTruckCN)}{truckRow?.EquipmentID != null ? ` #${truckRow.EquipmentID}` : ''}
           </strong>
         </div>
         {['Kirim', 'Terima', 'TerimaRaw'].map(kind => <div key={kind}>
@@ -546,6 +564,11 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
           </strong>
         </div>)}
       </section>
+      <div className={`transaction-coverage${reachedLimits.length ? ' transaction-coverage-warning' : ''}`} role="status" aria-label="Cakupan hasil procedure">
+        {reachedLimits.length > 0 && <><strong>Data mungkin terpotong.</strong> {reachedLimits.map(item => `${item.label}: ${item.count} baris (ambang ${item.limit})`).join('; ')}. </>}
+        Hasil dibatasi jumlah baris dan jendela waktu procedure. Data yang tidak muncul belum tentu tidak ada.
+        {reachedLimits.length > 0 && <span> Ambang mengacu pada definisi procedure yang diberikan operator, bukan konfirmasi ada data tambahan. Hitungan mencakup seluruh SK dalam hasil.</span>}
+      </div>
       <nav className="view-tabs" aria-label="Hasil analisa transaksi">
         <button aria-pressed={tab === 'timeline'} onClick={() => setTab('timeline')}>Kirim / Terima <span className="count">
           {transactions.length}
@@ -564,7 +587,7 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
             {tab === 'analysis' ? 'Pasangan transaksi & anomali ritase' : tab === 'timeline' ? 'Timeline Kirim / Terima' : tab === 'raw' ? 'Data TerimaRaw' : 'Detail aktivitas truck'}
           </h2>
           <span className="helper">
-            {tab === 'analysis' ? 'Pemeriksaan hasil yang tersedia' : tab === 'activity' ? 'Dikelompokkan per ritase' : tab === 'timeline' ? 'Urutan hasil procedure' : 'Semua kolom hasil procedure'}
+            {tab === 'analysis' ? 'Pemeriksaan hasil yang tersedia' : tab === 'activity' ? 'Dikelompokkan per ritase' : tab === 'timeline' ? 'Dikelompokkan per ritase' : 'Semua kolom hasil procedure'}
           </span>
         </div>
         {tab === 'analysis' && analysis ? <div className="anomaly-content">
@@ -635,7 +658,7 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
                     <tr>
                       <th>Waktu</th>
                       <th>Aktivitas</th>
-                      <th>Reader</th>
+                      <th>Reader / lokasi assignment</th>
                       <th>SK</th>
                       <th>Dasar pemilihan</th>
                     </tr>
@@ -649,7 +672,7 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
                         {value(row.trans)}
                       </td>
                       <td>
-                        {value(row.ReaderLocationName)}
+                        {isNewAssignment(row) ? `Muat: ${value(row.LoadingLocationName)} · Bongkar: ${value(row.DumpingLocationName)}` : value(row.ReaderLocationName)}
                       </td>
                       <td>
                         {value(row.CoalDeliveryNumber)}
@@ -696,12 +719,17 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
         </div> : tab === 'activity' ? activities.length ? <TruckActivities groups={activityGroups} offset={0} searchedCdn={result.coalDeliveryNumber} beforeCdn={beforeCdn} inTrip={inTrip} /> : <div className="empty">
           <h3>Aktivitas truck tidak muncul dalam hasil procedure</h3>
           <p>MT, Net Reader, Check Point, atau Tol Gate hanya ditampilkan jika dikembalikan procedure. Aktivitas tanpa SK tidak otomatis dianggap milik SK dicari.</p>
-        </div> : transactions.length ? <ol className="transaction-timeline">
-          {transactions.map((row, index) => <li key={index} className={`${sameCdn(row, result.coalDeliveryNumber) || beforeCdn.has(row) || inTrip.has(row) ? 'cdn-match' : ''} ${isDeleted(row) ? 'deleted-record' : ''}`}>
+        </div> : transactions.length ? <div className="truck-trips" tabIndex={0} role="region" aria-label="Ritase Kirim / Terima">
+          <p className="helper">Kelompok berdasarkan RefDumpingTonnageID, bukan SK saja. Pasangan hanya mencakup hasil procedure; transaksi tanpa pasangan tetap ditampilkan.</p>
+          {transactionGroups.map((group, groupIndex) => <section className="truck-trip" key={groupIndex} aria-label={`Ritase ${groupIndex + 1}`}>
+            <header className="trip-heading"><div><h3>Ritase {groupIndex + 1} · SK {group.sk.join(', ') || 'belum tercatat'}</h3><p>Mulai {date(group.start)} · Selesai {date(group.end)}</p></div><span className={`status ${group.status === 'Terhubung' ? 'online' : 'unknown'}`}>{group.status}</span></header>
+            {!!group.notes.length && <ul className="trip-notes">{group.notes.map((note, i) => <li key={i}>{note}</li>)}</ul>}
+            <ol className="transaction-timeline">
+          {group.rows.map((row, index) => <li key={index} className={`${sameCdn(row, result.coalDeliveryNumber) || beforeCdn.has(row) || inTrip.has(row) ? 'cdn-match' : ''} ${isDeleted(row) ? 'deleted-record' : ''}`}>
             <div className="timeline-marker" aria-hidden="true">
               {String(index + 1).padStart(2, '0')}
             </div>
-            <article>
+            <article className="transaction-card">
               <div className="transaction-title">
                 <h3>
                   {value(transactionKind(row))}
@@ -744,7 +772,9 @@ export function Transactions({ api, log, initialCdn = '' }: Props) {
               </div>
             </article>
           </li>)}
-        </ol> : <div className="empty">
+            </ol>
+          </section>)}
+        </div> : <div className="empty">
           <h3>Transaksi tidak muncul dalam hasil procedure</h3>
           <p>MT, Net Reader, Check Point, atau Tol Gate hanya ditampilkan jika dikembalikan procedure. Aktivitas tanpa SK tidak otomatis dianggap milik SK dicari.</p>
         </div>}

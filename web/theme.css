@@ -71,6 +71,7 @@
 [data-theme="dark"] .activity-stage-4 { --stage: #efa585; }
 [data-theme="dark"] .activity-stage-5 { --stage: #a0d997; }
 [data-theme="dark"] .activity-stage-6 { --stage: #afb7c0; }
+[data-theme="dark"] .activity-stage-7 { --stage: #85ced9; }
 [data-theme="dark"] :focus-visible { outline-color: var(--border-focus); }
 [data-theme="dark"] dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 

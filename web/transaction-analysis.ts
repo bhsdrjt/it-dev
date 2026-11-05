@@ -22,6 +22,7 @@ export const transactionKind = (row: Row) => {
   const kind = String(row.Transaksi ?? '').trim();
   return ({ Loading: 'Kirim', Dumping: 'Terima', RawDumping: 'TerimaRaw', DumpingRaw: 'TerimaRaw', RawTerima: 'TerimaRaw' } as Record<string, string>)[kind] || kind;
 };
+export const isNewAssignment = (row: Row) => /^new[\s_-]+assignment$/i.test(String(row.trans ?? '').trim());
 export const stages = ['Kosong Kirim', 'MT', 'Muat Kirim', 'Tollgate', 'Muat Terima', 'Kosong Terima'];
 export const sameCdn = (row: Row, cdn: string) => typeof row.CoalDeliveryNumber === 'string' && row.CoalDeliveryNumber.trim().toUpperCase() === cdn.trim().toUpperCase();
 const text = (value: Row[string] | undefined) => value === null || value === undefined || value === '' ? '—' : String(value);
@@ -64,12 +65,18 @@ export function groupTruckActivities(rows: Row[]) {
   let current: typeof ordered = [];
   for (const item of ordered) {
     if (!Number.isFinite(item.at)) { groups.push([item]); current = []; continue; }
+    if (!current.length && isNewAssignment(item.row)) { groups.push([item]); continue; }
     if (!current.length || activityStage(item.row) === 0) { current = []; groups.push(current); }
     current.push(item);
     if (activityStage(item.row) === 5) current = [];
   }
   return groups.map(items => {
     const events = items.map(item => item.row);
+    if (events.every(isNewAssignment)) return {
+      rows: events, sk: [] as string[], start: null, end: null,
+      notes: items.some(item => !Number.isFinite(item.at)) ? ['Waktu tidak valid; posisi perubahan assignment tidak dapat ditentukan'] : [],
+      status: 'Perubahan assignment',
+    };
     const steps = events.map(activityStage);
     const start = steps[0] === 0 ? items[0].at : null;
     const end = steps.at(-1) === 5 ? items.at(-1)!.at : null;
@@ -85,9 +92,10 @@ export function groupTruckActivities(rows: Row[]) {
     if (reversed) notes.push('Urutan tahap terbalik');
     if (repeated) notes.push('Tahap berulang; semua catatan tetap ditampilkan');
     if (sk.length > 1) notes.push('Lebih dari satu SK dalam kelompok');
-    if (steps.includes(null)) notes.push('Jenis aktivitas belum dikenali');
+    const unknown = events.some(row => activityStage(row) === null && !isNewAssignment(row));
+    if (unknown) notes.push('Jenis aktivitas belum dikenali');
     if (items.some(item => !Number.isFinite(item.at))) notes.push('Waktu tidak valid; posisi ritase tidak dapat ditentukan');
-    const review = reversed || repeated || sk.length > 1 || steps.includes(null) || items.some(item => !Number.isFinite(item.at));
+    const review = reversed || repeated || sk.length > 1 || unknown || items.some(item => !Number.isFinite(item.at));
     return { rows: events, sk, start, end, notes, status: review ? 'Urutan perlu diperiksa' : missing.length ? 'Belum lengkap' : 'Lengkap' };
   });
 }
@@ -312,7 +320,7 @@ function analyzeJourney(pair: Pair, pairs: Pair[], loadings: Row[], dumpings: Ro
     if (candidates.some(event => event.basis === 'Urutan ritase hingga Terima Kosong')) add('inferred-events', 'Aktivitas tanpa SK pada truck yang sama, sejak Kosong Kirim hingga Terima Kosong, masuk ritase SK yang terbit saat Muat Kirim berdasarkan urutannya. Nilai SK asli tidak diubah.', 'info');
     if (excluded) add('excluded-events', `${excluded} aktivitas diabaikan karena SK/truck berbeda atau batas ritase belum terverifikasi.`, 'info');
     if (undated) add('undated-events', `${undated} aktivitas tidak memiliki waktu valid; urutannya belum terverifikasi.`, 'info');
-    const unknown = candidates.filter(event => event.stage === null);
+    const unknown = candidates.filter(event => event.stage === null && !isNewAssignment(event.row));
     if (unknown.length) add('unknown-events', `${unknown.length} aktivitas belum dipetakan: ${[...new Set(unknown.map(event => `${text(event.row.trans)} / ${text(event.row.ReaderLocationName)}`))].join(', ')}. Check Point hanya dianggap MT jika nama lokasi menunjukkan mobile tower.`, 'info');
   }
   // 5. MT opsional, Tollgate boleh dua kali; tahap lain diharapkan sekali.

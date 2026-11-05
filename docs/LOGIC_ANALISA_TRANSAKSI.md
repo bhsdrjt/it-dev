@@ -17,21 +17,23 @@ Dokumen ini menjelaskan perilaku kode di `web/transaction-analysis.ts`, bukan ha
 
 ## 1. Peta alur
 
-1. Operator mengisi CoalDeliveryNumber pada `web/Transactions.tsx`.
+1. Operator mengisi CoalDeliveryNumber pada `web/Transactions.tsx`. Dari Monitoring, pilihan Analisa transaksi otomatis mengisi SK dan memuat hasil, termasuk klik ulang SK yang sama. Masuk melalui sidebar tidak memicu pencarian otomatis. Target baru membatalkan request baca sebelumnya di browser dan mengabaikan respons lamanya; jika mutasi sedang berjalan, pencarian target menunggu mutasi selesai.
 2. Browser memvalidasi teks, lalu mengirim `GET /transactions/timeline?coalDeliveryNumber=...` dengan JWT.
 3. `ApiController.timeline()` memvalidasi kembali input: teks ASCII tanpa karakter kontrol, setelah trim maksimal 50 karakter. Validasi server tetap wajib meskipun browser sudah memvalidasi.
 4. `DbService.truckTimeline()` mengikat parameter `CoalDeliveryNumber` sebagai `sql.VarChar(50)`, lalu menjalankan `dbo.usp_GetTruckTimelineByCoalDelivery`. Input tidak digabung ke SQL.
 5. Result set pertama menjadi `transactions`, kedua menjadi `activities`. Result set yang tidak tersedia menjadi array kosong. Timeout query ini 60 detik; query referensi biasa memakai timeout 10 detik.
 6. Browser menjalankan `analyzeTransactions()` terhadap snapshot tersebut. Tidak ada query tambahan untuk mencari pasangan yang hilang.
-7. UI menampilkan pasangan seluruh Kirim pembanding, sedangkan rincian ritase (`journeys`) hanya untuk CDN pencarian.
+7. UI menampilkan pasangan seluruh Kirim pembanding, sedangkan rincian ritase (`journeys`) hanya untuk CDN pencarian. Tab Kirim / Terima memakai `groupTruckTransactions()` seperti Timeline truck: grup berdasarkan referensi tersimpan, dengan nomor ritase, SK, waktu mulai/selesai, status, dan catatan. Transaksi tanpa pasangan atau referensi ambigu tetap ditampilkan terpisah; SK sama tidak otomatis digabung. TerimaRaw tetap pada tab sendiri, seluruh aksi kartu dan penanda SK/dispatcher dipertahankan.
 
 SQL error nomor `50001` dipetakan ke HTTP 404. Kegagalan DB lainnya menjadi HTTP 503 dengan pesan umum; detail teknis dicatat di server. Membatalkan request browser tidak menjamin query SQL ikut dibatalkan.
 
 ## 2. Sumber data dan batas bukti
 
-Kode SQL stored procedure tidak disertakan dalam proyek. Keterangan UI saat ini menyebut maksimal 3 Kirim, 3 Terima, dan 3 TerimaRaw dalam jendela truck: 2 jam sebelum `dtEmpty` sampai 144 jam setelah `dtLoaded`. UI juga menyebut `dtTimeCollected` TerimaRaw ditambah 10 detik oleh procedure. Ini kontrak yang diasumsikan UI, bukan aturan yang diterapkan ulang oleh TypeScript; cocokkan dengan definisi procedure yang terpasang.
+Definisi procedure yang diberikan operator pada 5 November 2026 mengambil maksimal 10 gabungan Kirim/Terima, 10 TerimaRaw, dan 30 aktivitas termasuk New Assignment, masing-masing berurutan waktu paling awal. Jendela truck diambil dari Kirim terbaru untuk CDN: 2 jam sebelum `dtLoaded` sampai 144 jam setelah `dtLoaded`. `dtTimeCollected` TerimaRaw adalah `dtEmpty` ditambah 10 detik. Aturan SQL tidak diterapkan ulang oleh TypeScript; definisi yang terpasang di DB belum diverifikasi langsung.
 
-Jumlah aktivitas dilaporkan dari respons aktual. Backend tidak menerapkan pemotongan tambahan.
+UI Analisa transaksi menampilkan catatan cakupan di atas seluruh tab hasil. Jika jumlah gabungan Kirim/Terima mencapai atau melebihi 10, TerimaRaw 10, atau aktivitas 30, muncul peringatan **Data mungkin terpotong** beserta jumlah dan ambang yang tercapai. Hitungan memakai seluruh SK dalam respons, termasuk baris dihapus dan New Assignment; alias jenis transaksi dinormalisasi. Ini indikasi berdasarkan definisi operator, bukan konfirmasi data tambahan. Di bawah ambang maupun hasil kosong, catatan tetap menjelaskan bahwa jumlah baris dan jendela waktu membatasi hasil; data yang tidak muncul belum tentu tidak ada. Ambang ini tidak diterapkan pada Timeline truck yang memakai procedure berbeda. Jika server kelak menyediakan metadata cakupan, gunakan metadata tersebut menggantikan ambang UI.
+
+Jumlah aktivitas dilaporkan dari respons aktual. Backend tidak menerapkan pemotongan tambahan. New Assignment ikut batas 30 aktivitas; penambahan assignment dapat mengurangi jumlah aktivitas timbang/reader yang terlihat.
 
 **Tidak terlihat dalam hasil bukan berarti tidak ada di database.** Temuan adalah indikasi untuk diperiksa. Gangguan jaringan, kesalahan operator, atau kegagalan sinkronisasi tidak dapat disimpulkan tanpa log pendukung.
 
@@ -115,6 +117,14 @@ Terima dengan CDN sama tetapi ID tidak sesuai referensi hanya menjadi catatan ka
 Label `trans` diubah ke lowercase; spasi, underscore, dan tanda hubung diseragamkan menjadi spasi. `Net Reader` atau `Check Point` hanya menjadi MT jika `ReaderLocationName` cocok pola MT/mobile tower. Reader lain tetap ditampilkan sebagai tahap tidak dikenal, bukan otomatis MT.
 
 MT mengenali asal batu di front loading. Tidak ada MT bukan anomali: operator dapat memilih asal batu manual. Analisa tidak membuktikan bahwa pemilihan manual benar-benar dilakukan.
+
+### New Assignment
+
+`trans = 'New Assignment'` pada result set kedua tampil di **Aktivitas truck** dengan ikon/warna tersendiri, waktu perubahan `dtTimeCollected`, truck `strTruckCN`, lokasi muat dan bongkar. Bukan transaksi final, bukan tahap timbang wajib, bukan pemicu batas ritase, dan tidak ditandai sebagai aktivitas tidak dikenal. Catatan di dalam ritase tetap ditampilkan menurut waktu tanpa mengubah hitungan tahap/pairing. Catatan di luar kelompok ritase tampil terpisah sebagai perubahan assignment, bukan ritase tidak lengkap. Waktu invalid tetap ditampilkan dengan catatan.
+
+SQL terbaru menyelaraskan posisi UNION assignment: `LoadingLocationName = ll.strLocationName` (lokasi muat), `DumpingLocationName = ld.strLocationName` (lokasi bongkar), dan `ReaderLocationName = NULL`. Kartu aktivitas dan bukti pada Analisa anomali memakai nama kolom tersebut langsung, tanpa mapping pergeseran. Detail seluruh kolom mempertahankan respons asli.
+
+Catatan ini menunjukkan nilai assignment tercatat, bukan perbandingan assignment lama/baru atau bukti perubahan SK. Procedure tidak menyediakan nilai sebelumnya; UI tidak menebaknya.
 
 ## 7. Batas ritase dan aktivitas sebelum CDN
 
