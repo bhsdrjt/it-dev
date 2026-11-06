@@ -1,6 +1,8 @@
 import { ConflictException, HttpException, Injectable, Logger, NotFoundException, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import sql from 'mssql';
+import { randomBytes } from 'node:crypto';
+import { authDatabaseIdentifier, loadingLocationCandidateSql, loadingLocationFields, loadingLocationSourceSql, loadingLocationReceiptSql, readLoadingLocation, snapshot } from './loading-location';
 // Nilai parameter dirender sebagai literal agar query di Activity Log dapat dibaca dan dijalankan ulang.
 function sqlLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'NULL';
@@ -210,10 +212,89 @@ export class DbService implements OnModuleDestroy {
       }
     });
   }
+  async transactionDetail(kind: 'Kirim' | 'Terima', id: number) {
+    const rows = await this.query<Record<string, unknown>>(kind === 'Kirim'
+      ? 'SELECT * FROM dbo.tabCTFinalLoadingTonnage WHERE CTFinalLoadingTonnageID = @id'
+      : 'SELECT * FROM dbo.tabCTFinalDumpingTonnage WHERE CTFinalDumpingTonnageID = @id', id);
+    if (!rows.length) throw new NotFoundException('Detail transaksi tidak ditemukan.');
+    if (rows.length !== 1) throw new ConflictException('ID transaksi tidak unik.');
+    return rows[0];
+  }
   relatedTransactions(kind: 'Kirim' | 'Terima', dumpingTonnageId: number) {
     return this.query<Record<string, unknown>>(kind === 'Kirim'
       ? 'SELECT * FROM dbo.tabCTFinalDumpingTonnage WHERE CTFinalDumpingTonnageID = @id'
       : 'SELECT * FROM dbo.tabCTFinalLoadingTonnage WHERE CTFinalDumpingTonnageID = @id', dumpingTonnageId);
+  }
+  previewLoadingLocation(loadingTonnageId: number) {
+    return this.withQueries(() => this.read(request => readLoadingLocation(request.input('id', sql.Int, loadingTonnageId), false)));
+  }
+  updateLoadingLocation(loadingTonnageId: number, previewToken: string, actorUserId: number) {
+    return this.withQueries(async () => {
+      let transaction: sql.Transaction | undefined;
+      let rolledBack = false;
+      try {
+        const auditDatabase = authDatabaseIdentifier();
+        transaction = new sql.Transaction(await this.connect());
+        transaction.on('rollback', () => { rolledBack = true; });
+        await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+        const request = this.traced(new sql.Request(transaction).input('id', sql.Int, loadingTonnageId));
+        const before = await readLoadingLocation(request, true);
+        if (before.previewToken !== previewToken.toLowerCase()) throw new ConflictException('Sumber atau kandidat berubah sejak preview. Muat ulang preview sebelum menyimpan.');
+        // Reread authoritative values under held locks; preserve SQL string lengths and numeric precision.
+        const updated = await request.query(`DECLARE @changed TABLE (id int);
+          ;WITH candidate AS (${loadingLocationCandidateSql(true)})
+          UPDATE target SET LoadingLocationID = candidate.LoadingLocationID,
+            strStockPileName = candidate.strStockPileName, CoalQualityID = candidate.CoalQualityID,
+            CoalCalory = candidate.CoalCalory, strCoalQualityName = candidate.strCoalQualityName
+          OUTPUT inserted.CTFinalLoadingTonnageID INTO @changed
+          FROM dbo.tabCTFinalLoadingTonnage target CROSS JOIN candidate
+          WHERE target.CTFinalLoadingTonnageID = @id AND target.dtDeletedAt IS NULL AND target.strStockPileName IS NULL;
+          SELECT COUNT(*) AS changed FROM @changed;`);
+        if (updated.recordset?.[0]?.changed !== 1) throw new ConflictException('Perubahan tidak menghasilkan tepat satu Kirim. Perubahan dibatalkan.');
+        const after = (await request.query<Record<string, unknown>>(loadingLocationSourceSql(true))).recordset;
+        const expected = { ...before.source, ...Object.fromEntries(loadingLocationFields.map(key => [key, before.candidate[key]])) };
+        // Full row snapshot protects truck, SK, weights, timestamps and references without guessing column names.
+        if (after.length !== 1 || snapshot(after[0]) !== snapshot(expected)) throw new ConflictException('Hasil perubahan atau kolom Kirim yang dilindungi tidak sesuai. Perubahan dibatalkan.');
+        let receiptAfter: Record<string, unknown> | null = null;
+        if (before.receipt) {
+          const receiptUpdated = await request.query(`DECLARE @changed TABLE (id int);
+            UPDATE d SET LoadingLocationID = k.LoadingLocationID, strStockPileName = k.strStockPileName,
+              CoalQualityID = k.CoalQualityID, CoalCalory = k.CoalCalory, strCoalQualityName = k.strCoalQualityName
+            OUTPUT inserted.CTFinalDumpingTonnageID INTO @changed
+            FROM dbo.tabCTFinalDumpingTonnage d JOIN dbo.tabCTFinalLoadingTonnage k
+              ON d.CTFinalDumpingTonnageID = k.CTFinalDumpingTonnageID
+            WHERE k.CTFinalLoadingTonnageID = @id AND d.dtDeletedAt IS NULL;
+            SELECT COUNT(*) AS changed FROM @changed;`);
+          if (receiptUpdated.recordset?.[0]?.changed !== 1) throw new ConflictException('Update pasangan Terima gagal. Seluruh perubahan dibatalkan.');
+          const receipts = (await request.query<Record<string, unknown>>(loadingLocationReceiptSql(true))).recordset;
+          const expectedReceipt = { ...before.receipt, ...Object.fromEntries(loadingLocationFields.map(key => [key, before.candidate[key]])) };
+          if (receipts.length !== 1 || snapshot(receipts[0]) !== snapshot(expectedReceipt)) throw new ConflictException('Hasil Terima tidak sesuai. Seluruh perubahan dibatalkan.');
+          receiptAfter = receipts[0];
+          const sourceAgain = (await request.query<Record<string, unknown>>(loadingLocationSourceSql(true))).recordset;
+          if (sourceAgain.length !== 1 || snapshot(sourceAgain[0]) !== snapshot(expected)) throw new ConflictException('Kirim berubah saat sinkronisasi Terima. Seluruh perubahan dibatalkan.');
+        }
+        const operationId = randomBytes(16).toString('hex');
+        await this.traced(new sql.Request(transaction))
+          .input('actor', sql.Int, actorUserId).input('action', sql.NVarChar(100), 'loading_location.update')
+          .input('target', sql.NVarChar(sql.MAX), snapshot({ loadingTonnageId, before: before.source, after: after[0], receiptBefore: before.receipt, receiptAfter, readerAt: before.candidate.readerAt }))
+          .input('operation', sql.VarChar(32), operationId).input('outcome', sql.VarChar(20), 'succeeded')
+          .query(`INSERT ${auditDatabase}.dbo.UserAudit(ActorUserId,Action,Target,OperationId,Outcome)
+            VALUES(@actor,@action,@target,@operation,@outcome)`);
+        await transaction.commit();
+        return { message: `LoadingLocation Kirim #${loadingTonnageId}${before.receipt ? ` dan Terima #${before.receipt.CTFinalDumpingTonnageID}` : ' (tanpa pasangan Terima)'} berhasil diperbarui.`, operationId };
+      } catch (error) {
+        if (transaction && !rolledBack) {
+          try { await transaction.rollback(); }
+          catch (cause) {
+            this.logger.error('LoadingLocation rollback failed', cause);
+            throw new ServiceUnavailableException('Hasil Get LoadingLocation belum dapat dipastikan. Muat ulang dan periksa data sebelum mencoba kembali.');
+          }
+        }
+        if (error instanceof NotFoundException || error instanceof ConflictException) throw error;
+        this.logger.error('LoadingLocation update failed', error);
+        throw new ServiceUnavailableException('Hasil Get LoadingLocation belum dapat dipastikan. Muat ulang dan periksa data sebelum mencoba kembali.');
+      }
+    });
   }
   pairLoadingRelation(loadingTonnageId: number) {
     return this.withQueries(async () => {

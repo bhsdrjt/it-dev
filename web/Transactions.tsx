@@ -5,6 +5,7 @@ import { confirmAction } from './confirm-action';
 import { Icon } from './Icon';
 import { ActionIcon, Details, cell, date, value } from './TransactionCard';
 import { TruckActivities } from './TruckActivities';
+import { LoadingLocationModal, type LoadingLocationPreview } from './LoadingLocationModal';
 import { SkeletonPanel } from './SkeletonPanel';
 import { analyzeTransactions, dispatcherLabel, groupTruckActivities, groupTruckTransactions, isDispatcherCreated, isNewAssignment, sameCdn, stages, transactionKind, type Row } from './transaction-analysis';
 type Result = {
@@ -70,7 +71,7 @@ export function RelationModal({ row, api, close }: { row: Row; api: Props['api']
     </div>
   </dialog>;
 }
-function CardActions({ row, disabled, busy, copy, generateSk, remove, restore }: { row: Row; disabled: boolean; busy?: boolean; copy: (row: Row) => void; generateSk: (row: Row) => void; remove: (row: Row) => void; restore: (row: Row) => void }) {
+function CardActions({ row, disabled, busy, copy, generateSk, getLoadingLocation, remove, restore }: { row: Row; disabled: boolean; busy?: boolean; copy: (row: Row) => void; generateSk: (row: Row) => void; getLoadingLocation: (row: Row) => void; remove: (row: Row) => void; restore: (row: Row) => void }) {
   const can = usePermissions();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -78,7 +79,8 @@ function CardActions({ row, disabled, busy, copy, generateSk, remove, restore }:
   const options = useRef<HTMLDivElement>(null);
   const deleted = isDeleted(row);
   const blocked = disabled;
-  const hasMenu = !deleted && (can('transactions.delete') || (transactionKind(row) === 'Kirim' && (can('transactions.copy_loading') || can('transactions.generate_receipt'))));
+  const canGetLocation = transactionKind(row) === 'Kirim' && row.strStockPileName === null;
+  const hasMenu = !deleted && (canGetLocation || can('transactions.delete') || (transactionKind(row) === 'Kirim' && (can('transactions.copy_loading') || can('transactions.generate_receipt'))));
   useLayoutEffect(() => {
     const menu = options.current;
     const button = trigger.current;
@@ -118,6 +120,7 @@ function CardActions({ row, disabled, busy, copy, generateSk, remove, restore }:
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
     </button>
     {open && !blocked && !deleted && <div className="card-actions-options" ref={options} popover="manual">
+      {canGetLocation && <button type="button" onClick={() => { trigger.current?.focus(); setOpen(false); getLoadingLocation(row); }}>Get LoadingLocation</button>}
       {can('transactions.copy_loading') && transactionKind(row) === 'Kirim' && <button type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); copy(row); }}>Salin Muatan</button>}
       {transactionKind(row) === 'Kirim' && <button hidden={!can('transactions.generate_receipt')} type="button" disabled={!/^[\x20-\x7E]{1,20}$/.test(String(row.CoalDeliveryNumber ?? '').trim())} onClick={() => { trigger.current?.focus(); setOpen(false); generateSk(row); }}>Generate SK Terima</button>}
       <button hidden={!can('transactions.delete')} type="button" className="danger" onClick={() => { trigger.current?.focus(); setOpen(false); remove(row); }}>Hapus</button>
@@ -216,6 +219,7 @@ function SalinMuatanModal({ api, row, busy, close, submit, submitKeTerimaAda }: 
 export function Transactions({ api, log, initialTarget = null }: Props) {
   const can = usePermissions();
   const [relationRow, setRelationRow] = useState<Row | null>(null);
+  const [loadingLocationRow, setLoadingLocationRow] = useState<Row | null>(null);
   const [cdn, setCdn] = useState(initialTarget?.cdn ?? '');
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
@@ -284,6 +288,7 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
     pending.current = null;
     setBusy(false);
     setCdn(initialTarget.cdn);
+    setLoadingLocationRow(null);
     setRelationRow(null);
     setSalinRow(null);
     void search(initialTarget.cdn);
@@ -404,6 +409,24 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
       setSalinRow(null);
     }
   }
+  async function saveLoadingLocation(preview: LoadingLocationPreview) {
+    const row = loadingLocationRow;
+    if (!row || !result || releasePending.current || pending.current || salinPending.current || promotionPending.current || promotionNeedsReload || isDeleted(row) || row.strStockPileName !== null) return;
+    releasePending.current = true; setReleasing(true); setActiveRow(Number(row.CTFinalTonnageID));
+    setPromotionNeedsReload(true); setError(''); setReleaseMessage(''); setPromotionMessage(''); setSalinMessage('');
+    try {
+      const response = await api<{ message: string }>('/transactions/loading-location', 'POST', { loadingTonnageId: Number(row.CTFinalTonnageID), previewToken: preview.previewToken, confirmed: true });
+      setReleaseMessage(response.message); log('ok', response.message);
+      await reloadTimeline(result.coalDeliveryNumber);
+    } catch (cause) {
+      const rejected = cause instanceof Error && 'status' in cause && [400, 403, 404, 409].includes(Number(cause.status));
+      if (rejected) setPromotionNeedsReload(false);
+      const message = `${cause instanceof Error ? cause.message : 'Get LoadingLocation gagal.'}${rejected ? ' Buka kembali preview untuk memeriksa data terbaru.' : ' Status belum pasti. Muat ulang analisa sebelum mencoba lagi.'}`;
+      setError(message); log('err', message);
+    } finally {
+      releasePending.current = false; setReleasing(false); setActiveRow(null); setLoadingLocationRow(null);
+    }
+  }
   async function generateSkTerima(row: Row) {
     if (releasePending.current || pending.current || salinPending.current || promotionPending.current || promotionNeedsReload || !result || isDeleted(row)) return;
     const cdn = String(row.CoalDeliveryNumber ?? '').trim();
@@ -491,7 +514,7 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
       setActiveRow(null);
     }
   }
-  const actions = (row: Row) => <CardActions row={row} busy={activeRow === Number(row.CTFinalTonnageID) && (promoting || releasing)} disabled={busy || promoting || releasing || salining || promotionNeedsReload || isDeleted(row)} copy={setSalinRow} generateSk={row => void generateSkTerima(row)} remove={row => void deleteTransaction(row)} restore={row => void restoreTransaction(row)} />;
+  const actions = (row: Row) => <CardActions row={row} busy={activeRow === Number(row.CTFinalTonnageID) && (promoting || releasing)} disabled={busy || promoting || releasing || salining || promotionNeedsReload || isDeleted(row)} copy={setSalinRow} getLoadingLocation={setLoadingLocationRow} generateSk={row => void generateSkTerima(row)} remove={row => void deleteTransaction(row)} restore={row => void restoreTransaction(row)} />;
   // Pisahkan tampilan final/raw, tetapi analisa tetap menerima snapshot lengkap.
   // CDN pembanding diperlukan untuk mendeteksi referensi milik ritase lain.
   const transactions = result?.transactions.filter(row => transactionKind(row) !== 'TerimaRaw') || [];
@@ -501,12 +524,7 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
   const columns = [...new Set(raw.flatMap(row => Object.keys(row)))];
   const activities = result?.activities || [];
   // ponytail: ambang dari definisi procedure operator; gunakan metadata server jika tersedia.
-  const reachedLimits = [
-    { label: 'Kirim / Terima (gabungan)', count: transactions.filter(row => ['Kirim', 'Terima'].includes(transactionKind(row))).length, limit: 10 },
-    { label: 'TerimaRaw', count: raw.length, limit: 10 },
-    { label: 'Aktivitas truck', count: activities.length, limit: 30 },
-  ].filter(item => item.count >= item.limit);
-  const activityGroups = groupTruckActivities(activities);
+  const activityGroups = groupTruckActivities(activities, result?.transactions ?? []);
   const targetRow = target[0];
   const truckRow = targetRow?.strEquipmentName ? targetRow : result?.transactions[0];
   const analysis = result ? analyzeTransactions(result.transactions, activities, result.coalDeliveryNumber) : null;
@@ -514,6 +532,7 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
   const beforeCdn = new Set(analysis?.journeys.flatMap(journey => journey.candidates.filter(event => event.basis === 'Urutan sebelum SK terbit').map(event => event.row)) || []);
   const inTrip = new Set(analysis?.journeys.flatMap(journey => journey.candidates.filter(event => event.basis === 'Urutan ritase hingga Terima Kosong').map(event => event.row)) || []);
   return <div className="transaction-workspace">
+    {loadingLocationRow && <LoadingLocationModal row={loadingLocationRow} api={api} close={() => setLoadingLocationRow(null)} save={saveLoadingLocation} busy={releasing} />}
     {relationRow && <RelationModal row={relationRow} api={api} close={() => setRelationRow(null)} />}
     {salinRow && <SalinMuatanModal api={api} row={salinRow} busy={salining} close={() => setSalinRow(null)} submit={(number, truck) => void salinMuatan(number, truck)} submitKeTerimaAda={(number, truck, dumpingId) => void salinMuatan(number, truck, dumpingId)} />}
     <div className="page-heading">
@@ -564,10 +583,8 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
           </strong>
         </div>)}
       </section>
-      <div className={`transaction-coverage${reachedLimits.length ? ' transaction-coverage-warning' : ''}`} role="status" aria-label="Cakupan hasil procedure">
-        {reachedLimits.length > 0 && <><strong>Data mungkin terpotong.</strong> {reachedLimits.map(item => `${item.label}: ${item.count} baris (ambang ${item.limit})`).join('; ')}. </>}
+      <div className="transaction-coverage" role="status" aria-label="Cakupan hasil procedure">
         Hasil dibatasi jumlah baris dan jendela waktu procedure. Data yang tidak muncul belum tentu tidak ada.
-        {reachedLimits.length > 0 && <span> Ambang mengacu pada definisi procedure yang diberikan operator, bukan konfirmasi ada data tambahan. Hitungan mencakup seluruh SK dalam hasil.</span>}
       </div>
       <nav className="view-tabs" aria-label="Hasil analisa transaksi">
         <button aria-pressed={tab === 'timeline'} onClick={() => setTab('timeline')}>Kirim / Terima <span className="count">
@@ -760,7 +777,7 @@ export function Transactions({ api, log, initialTarget = null }: Props) {
                   </button>
                 </>}
               </p>
-              <Details row={row} />
+              <Details row={row} api={api} />
               {unpaired.has(row) && <p className="finding-warn"><strong>data tidak berpasangan otomatis</strong></p>}
               <div className="transaction-times">
                 <span>Timbang kosong · dtEmpty<time>

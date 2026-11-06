@@ -87,7 +87,7 @@ test('every BioStar route requires unified permission through JwtGuard', async t
   }
 });
 
-test('BioStar seed creates only unified permission and migration grants only previous start roles', async () => {
+test('permission seed is rerunnable without grants; BioStar migration grants only previous start roles', async () => {
   const { readFileSync } = require('node:fs');
   const db = new AuthDbService();
   const inserted = [];
@@ -97,7 +97,7 @@ test('BioStar seed creates only unified permission and migration grants only pre
     async query(statement) {
       if (statement.startsWith('SELECT')) {
         assert.match(statement, /WHERE Name IN \('biostar.import'\)/);
-        return { recordset: seeded ? [{ Name: 'biostar.import' }] : [] };
+        return { recordset: seeded ? inserted.map(Name => ({ Name })) : [] };
       }
       assert.match(statement, /^INSERT dbo.AuthPermissions/);
       seeded = true;
@@ -124,7 +124,7 @@ test('BioStar seed creates only unified permission and migration grants only pre
   assert(cleanup.indexOf('DELETE rp') < cleanup.indexOf('DELETE p FROM'));
   const setup = readFileSync('sql/itmonitor-auth.sql', 'utf8');
   assert.match(setup, /WHERE p.Name <> N'biostar.import' AND/);
-  assert.match(setup, /INSERT dbo.AuthPermissions\(Name\) VALUES\(N'biostar.import'\)/);
+  assert.match(setup, /VALUES\(N'biostar.import'\)/);
 });
 
 test('auth environment requires separate credentials and database', () => {

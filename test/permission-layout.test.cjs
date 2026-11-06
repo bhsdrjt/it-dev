@@ -7,7 +7,7 @@ const { join } = require('node:path');
 const { spawn } = require('node:child_process');
 const browser = process.env.CHROME_PATH || ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(existsSync);
 const viewer = ['equipment.view', 'coal.view', 'transactions.view', 'monitoring.view', 'timeline.view', 'activity.view'];
-const profiles = { viewer, mixed: ['equipment.view', 'equipment.ping', 'coal.view', 'coal.delete', 'transactions.view', 'transactions.copy_loading', 'transactions.restore', 'monitoring.view'], monitoring: ['monitoring.view'], equipment: ['equipment.view'], coal: ['coal.view'], biostar: ['biostar.import'], legacyBiostar: ['biostar.import.view', 'biostar.import.start'], none: [] };
+const profiles = { viewer, transactions: ['transactions.view'], mixed: ['equipment.view', 'equipment.ping', 'coal.view', 'coal.delete', 'transactions.view', 'transactions.copy_loading', 'transactions.restore', 'monitoring.view'], monitoring: ['monitoring.view'], equipment: ['equipment.view'], coal: ['coal.view'], biostar: ['biostar.import'], legacyBiostar: ['biostar.import.view', 'biostar.import.start'], none: [] };
 for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Object.entries(profiles)) test(`permission layout ${name} ${size}`, { skip: !browser, timeout: 30000 }, async () => {
   const profile = await mkdtemp(join(process.env.TEMP ? join(process.env.TEMP, 'opencode') : process.cwd(), 'permission-layout-'));
   const script = `
@@ -17,6 +17,7 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
     const visible = node => !!node && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden';
     const tick = () => new Promise(resolve => setTimeout(resolve, 150));
     const calls = [];
+    let loadingLocationRow = { LoadingLocationID: 7, strStockPileName: null };
     window.fetch = async (path, options = {}) => {
       calls.push(path);
       check(!options.method || options.method === 'GET', 'fixture forbids writes');
@@ -29,7 +30,8 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
       else if (path === '/coal-calories') data = [{ CoalQualityAGMID: 1, CoalQualityID: 11, CoalQualityName: 'SEAM FIXTURE', Coalcalory: 5000, dtUpdatedAt: '2026-10-01T08:00:00' }];
       else if (path.startsWith('/anomalies?')) data = { anomalies: [{ id: 'one', code: 'KIRIM_TANPA_PASANGAN_7D', severity: 'critical', category: 'pairing', title: 'Fixture anomaly', detail: 'Fixture detail', cdn: 'FIXTURE', truck: 'TR-10', equipmentId: 10, loadingId: 1, dumpingId: null, eventAt: new Date().toISOString() }], queries: [] };
       else if (path.startsWith('/transactions/truck-history?')) data = { equipmentId: 10, starttime: '2026-10-01T06:00:00', endtime: '2026-10-01T12:00:00', transactions: [], activities: [] };
-      else if (path.startsWith('/transactions/timeline?')) data = { coalDeliveryNumber: 'FIXTURE', transactions: ['Kirim', 'Terima', 'Terima'].map((Transaksi, i) => ({ Transaksi, CTFinalTonnageID: i + 1, CoalDeliveryNumber: 'FIXTURE', RefDumpingTonnageID: null, dtLoaded: '2026-10-01T08:00:00', dtEmpty: '2026-10-01T09:00:00', dtTimeCollected: '2026-10-01T08:00:00.000', UserName: 'dispatcher', dtDeletedAt: i === 2 ? '2026-10-02T08:00:00' : null })), activities: [] };
+      else if (path.startsWith('/transactions/timeline?')) data = { coalDeliveryNumber: 'FIXTURE', transactions: ['Kirim', 'Terima', 'Terima'].map((Transaksi, i) => ({ Transaksi, CTFinalTonnageID: i + 1, CoalDeliveryNumber: 'FIXTURE', RefDumpingTonnageID: null, dtLoaded: '2026-10-01T08:00:00.000', dtEmpty: '2026-10-01T09:00:00.000', dtTimeCollected: '2026-10-01T08:00:00.000', UserName: 'dispatcher', dtDeletedAt: i === 2 ? '2026-10-02T08:00:00' : null, ...(i === 0 ? loadingLocationRow : { strStockPileName: null }) })), activities: [] };
+      else if (path === '/transactions/detail?kind=Terima&tonnageId=2') data = { CTFinalDumpingTonnageID: 2, CoalDeliveryNumber: 'FRESH-RECEIPT', dtDeletedAt: null };
       else throw Error('Unexpected fixture request: ' + path);
       return { ok: true, json: async () => data };
     };
@@ -105,7 +107,7 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
         const trips = document.querySelectorAll('[aria-label="Ritase Kirim / Terima"] > .truck-trip');
         check(trips.length === 3 && [...trips].every(trip => trip.querySelectorAll('.transaction-card').length === 1), 'same SK without reference stays in separate groups, including deleted receipt');
         const receipt = [...document.querySelectorAll('.transaction-card')].find(card => card.querySelector('h3').textContent.trim() === 'Terima');
-        const detail = receipt.querySelector('.column-details > summary');
+        const detail = receipt.querySelector('.column-details > button');
         const titleBounds = receipt.querySelector('.transaction-title').getBoundingClientRect();
         check(Math.abs(detail.getBoundingClientRect().top - titleBounds.top) < 2, 'read-only detail icon shares title row');
         if (innerWidth >= 1000) {
@@ -114,19 +116,35 @@ for (const size of ['1280,720', '390,844']) for (const [name, permissions] of Ob
           check(receipt.getBoundingClientRect().height < 105, 'read-only card has no empty detail row');
         }
         detail.click(); await tick();
-        check(receipt.querySelector('.column-details').open, 'read-only detail expands');
-        detail.click(); await tick();
+        const detailDialog = receipt.querySelector('.column-details dialog');
+        check(detailDialog.open && detailDialog.matches(':modal'), 'read-only detail opens modal');
+        detailDialog.querySelector('button').click(); await tick();
+        check(!detailDialog.open && document.activeElement === detail, 'read-only modal closes and restores focus');
         check(!visible(document.querySelector('[aria-label="Aksi Terima 2"]')), 'copy-only cannot open empty Terima menu');
         check(!visible(document.querySelector('[aria-label="Aksi Terima 3"]')), 'deleted row has no dead dropdown');
         const trigger = document.querySelector('[aria-label="Aksi Kirim 1"]');
-        check(visible(trigger) === permissions.includes('transactions.copy_loading'), 'Kirim menu permission');
+        check(visible(trigger), 'null stockpile Kirim menu available with transactions.view');
         if (visible(trigger)) {
           trigger.click(); await tick();
           const menu = document.querySelector('.card-actions-options');
-          check([...menu.querySelectorAll('button')].filter(visible).length === 1, 'only allowed copy action');
+          check([...menu.querySelectorAll('button')].filter(visible).length === (permissions.includes('transactions.copy_loading') ? 2 : 1), 'only available actions visible');
+          check([...menu.querySelectorAll('button')].some(node => visible(node) && node.textContent === 'Get LoadingLocation'), 'null stockpile action needs no feature permission, even with existing location ID');
           const rect = menu.getBoundingClientRect();
           check(rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight, 'menu not clipped');
+          trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await tick();
         }
+        for (const [label, row] of [['undefined', {}], ['filled', { strStockPileName: 'Existing stockpile' }], ['zero', { strStockPileName: 0 }], ['blank', { strStockPileName: '' }], ['deleted', { strStockPileName: null, dtDeletedAt: '2026-10-02T08:00:00' }], ['nonKirim', { strStockPileName: null, Transaksi: 'Terima' }]]) {
+          loadingLocationRow = row;
+          input.closest('form').requestSubmit(); await tick(); layout();
+          const action = document.querySelector('[aria-label="Aksi ' + (row.Transaksi || 'Kirim') + ' 1"]');
+          if (!permissions.includes('transactions.copy_loading')) check(!visible(action), label + ' has no LoadingLocation-only action menu');
+          if (visible(action) && !action.disabled) {
+            action.click(); await tick();
+            check(![...document.querySelectorAll('.card-actions-options button')].some(node => visible(node) && node.textContent === 'Get LoadingLocation'), label + ' excludes Get LoadingLocation');
+            action.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await tick();
+          }
+        }
+        check(!calls.some(path => path.startsWith('/transactions/loading-location')), 'visibility checks never request preview or write');
       }
       document.body.dataset.testResult = 'passed';
     } catch (error) { document.body.dataset.testResult = 'failed: ' + error.message; } });

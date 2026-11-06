@@ -24,9 +24,13 @@ test('transaction trips use stored references, preserve orphan and ambiguous row
   assert.deepEqual(groupTruckTransactions([]), []);
 });
 test('truck groups preserve rows, sort time, close trips and flag incomplete or unusual sequences', () => {
-  const row = (trans, minute, sk = null) => Object.freeze({ trans, dtTimeCollected: `2026-04-01T06:${String(minute).padStart(2, '0')}:00.000Z`, CoalDeliveryNumber: sk });
+  const row = (trans, minute, sk = null) => Object.freeze({ trans, dtTimeCollected: `2026-04-01T06:${String(minute).padStart(2, '0')}:00.000Z`, CoalDeliveryNumber: sk, strTruckCN: 'TR1' });
   const complete = [row('Kirim kosong', 0), row('Kirim muat', 1, 'SK1'), row('Tollgate', 2), row('Tollgate', 3), row('Terima muat', 4), row('Terima kosong', 5)];
-  const groups = groupTruckActivities(Object.freeze([...complete].reverse()));
+  const final = [
+    { Transaksi: 'Kirim', CTFinalTonnageID: 1, RefDumpingTonnageID: 2, strEquipmentName: 'TR1', CoalDeliveryNumber: 'SK1', dtEmpty: complete[0].dtTimeCollected, dtLoaded: complete[1].dtTimeCollected },
+    { Transaksi: 'Terima', CTFinalTonnageID: 2, strEquipmentName: 'TR1', dtLoaded: complete[4].dtTimeCollected, dtEmpty: complete[5].dtTimeCollected },
+  ];
+  const groups = groupTruckActivities(Object.freeze([...complete].reverse()), final);
   assert.equal(groups[0].status, 'Lengkap');
   assert.deepEqual(groups[0].rows, complete);
   assert.deepEqual(groups[0].sk, ['SK1']);
@@ -34,12 +38,13 @@ test('truck groups preserve rows, sort time, close trips and flag incomplete or 
   const partial = groupTruckActivities([row('Tollgate', 0), row('Kirim kosong', 1), row('Kirim kosong', 2), row('Terima kosong', 3)]);
   assert.equal(partial.length, 3);
   assert.ok(partial[0].notes.includes('Awal ritase tidak terlihat'));
-  assert.ok(partial[1].notes.includes('Akhir ritase tidak terlihat'));
-  assert.equal(partial[2].status, 'Belum lengkap');
+  assert.ok(partial[1].notes.some(note => note.includes('Penutup belum terverifikasi')));
+  assert.equal(partial[2].status, 'Penutup belum terverifikasi');
   const odd = [row('Kirim kosong', 0), row('Terima muat', 1), row('Kirim muat', 2, 'A'), row('Kirim muat', 3, 'B'), row('Other', 4), row('Terima kosong', 5), { trans: 'MT', dtTimeCollected: null }];
   const unusual = groupTruckActivities(odd);
-  assert.equal(unusual[0].status, 'Urutan perlu diperiksa');
-  assert.equal(unusual[1].status, 'Urutan perlu diperiksa');
+  assert.equal(unusual[0].status, 'Penutup belum terverifikasi');
+  assert.ok(unusual[0].notes.includes('Urutan tahap terbalik'));
+  assert.equal(unusual[1].status, 'Penutup belum terverifikasi');
   assert.deepEqual(unusual.flatMap(group => group.rows), odd);
   assert.equal(groupTruckActivities([]).length, 0);
 });
@@ -60,11 +65,11 @@ test('New Assignment stays visible without changing stages, trip boundaries or p
   assert.equal(result.journeys[0].end, baseline.journeys[0].end);
   assert.ok(result.journeys[0].candidates.some(item => item.row === assignment && item.stage === null));
   assert.ok(!codes(result.journeys[0].findings).includes('unknown-events'));
-  const group = groupTruckActivities([...events, assignment])[0];
+  const group = groupTruckActivities([...events, assignment], [loading, dumping])[0];
   assert.equal(group.status, 'Lengkap');
   assert.equal(group.rows[4], assignment);
   const outside = [event('New Assignment', '09:00'), event('New Assignment', '12:40'), { trans: 'New Assignment', dtTimeCollected: null }];
-  const groups = groupTruckActivities([...events, ...outside]);
+  const groups = groupTruckActivities([...events, ...outside], [loading, dumping]);
   assert.equal(groups.length, 4);
   for (const index of [0, 2, 3]) {
     assert.equal(groups[index].status, 'Perubahan assignment');
@@ -74,16 +79,16 @@ test('New Assignment stays visible without changing stages, trip boundaries or p
   assert.equal(groups.flatMap(group => group.rows).length, events.length + outside.length);
   assert.equal(compiled.exports.isNewAssignment({ trans: ' NEW_ASSIGNMENT ' }), true);
   assert.equal(compiled.exports.isNewAssignment({ trans: 'Other' }), false);
-  assert.equal(groupTruckActivities([...events, event('Other', '11:30')])[0].status, 'Urutan perlu diperiksa');
+  assert.equal(groupTruckActivities([...events, event('Other', '11:30')], [loading, dumping])[0].status, 'Urutan perlu diperiksa');
 });
 
 test('Net Reader at CP locations is MT; repeated readings before loading are valid', () => {
   const readings = ['CP 10', 'CP 09', 'CP 10'].map((ReaderLocationName, i) => event(i === 1 ? 'NetReader' : 'Net Reader', `10:${20 + i}`, { ReaderLocationName }));
   for (const row of readings) assert.equal(activityStage(row), 1);
-  const trip = groupTruckActivities([...events.filter(row => row.trans !== 'Net Reader'), ...readings])[0];
+  const trip = groupTruckActivities([...events.filter(row => row.trans !== 'Net Reader'), ...readings], [loading, dumping])[0];
   assert.equal(trip.status, 'Lengkap');
   assert.equal(trip.rows.filter(row => activityStage(row) === 1).length, 3);
-  assert.equal(groupTruckActivities([...trip.rows, event('Net Reader', '11:10', { ReaderLocationName: 'CP 10' })])[0].status, 'Urutan perlu diperiksa');
+  assert.equal(groupTruckActivities([...trip.rows, event('Net Reader', '11:10', { ReaderLocationName: 'CP 10' })], [loading, dumping])[0].status, 'Urutan perlu diperiksa');
 });
 
 test('AF26R000012: trip without Kirim activities pairs by CDN and same-second physical times', () => {
@@ -99,7 +104,7 @@ test('AF26R000012: trip without Kirim activities pairs by CDN and same-second ph
   const journey = result.journeys[0];
   assert.ok(codes(journey.findings).includes('not-auto-paired'));
   assert.match(journey.findings.find(item => item.code === 'not-auto-paired').text, /detik yang sama/);
-  assert.equal(journey.end, '2026-04-21T17:21:40.247Z');
+  assert.equal(journey.end, null, 'same-second physical candidate is not a verified referenced closure');
   assert.deepEqual(journey.counts, [0, 0, 0, 0, 1, 1]);
   assert.ok(codes(journey.findings).includes('missing-0'));
   assert.ok(codes(journey.findings).includes('missing-2'));
@@ -114,18 +119,94 @@ test('AF26R000012: trip without Kirim activities pairs by CDN and same-second ph
   assert.equal(sameSecond.pairs[0].unpairedDumping.CTFinalTonnageID, 3738119);
 });
 
-test('dispatcher marker requires explicit zero milliseconds on final Kirim/Terima only', () => {
+test('AB260693242: repeated receipt empty closes only at referenced exact dtEmpty in both views', () => {
+  const stamp = time => `2026-11-05T${time}Z`;
+  const kirim = Object.freeze({ ...loading, CTFinalTonnageID: 2983074, RefDumpingTonnageID: 4078706, CoalDeliveryNumber: 'AB260693242', strEquipmentName: 'TR02078', dtEmpty: stamp('07:18:58.653'), dtLoaded: stamp('08:37:49.887') });
+  const earlier = Object.freeze({ ...kirim, CTFinalTonnageID: 2983073, RefDumpingTonnageID: null, CoalDeliveryNumber: 'AB260693240', dtLoaded: stamp('08:36:00.877') });
+  const terima = Object.freeze({ ...dumping, CTFinalTonnageID: 4078706, CoalDeliveryNumber: kirim.CoalDeliveryNumber, dtLoaded: stamp('09:00:44.593'), dtEmpty: stamp('09:17:26.000') });
+  const rows = Object.freeze([
+    ['Kirim - Kosong', kirim.dtEmpty, null], ['Net Reader', stamp('08:30:07.680'), null],
+    ['Kirim - Muat', earlier.dtLoaded, earlier.CoalDeliveryNumber], ['Kirim - Muat', kirim.dtLoaded, kirim.CoalDeliveryNumber],
+    ['Tol Gate', stamp('08:53:30.707'), null], ['Terima - Muat', terima.dtLoaded, null],
+    ['Terima - Kosong', stamp('09:13:23.073'), null], ['Terima - Kosong', terima.dtEmpty, null],
+  ].map(([trans, dtTimeCollected, CoalDeliveryNumber]) => Object.freeze({ trans, dtTimeCollected, CoalDeliveryNumber, strTruckCN: 'TR02078' })));
+  const finals = Object.freeze([earlier, kirim, terima]);
+  const groups = groupTruckActivities(Object.freeze([...rows].reverse()), finals);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].rows, rows);
+  assert.equal(groups[0].end, Date.parse(terima.dtEmpty));
+  assert.ok(groups[0].notes.some(note => note.includes('Timbang kosong Terima tercatat lebih dari sekali')));
+  const journey = analyzeTransactions(finals, rows, kirim.CoalDeliveryNumber).journeys[0];
+  assert.equal(journey.start, kirim.dtEmpty);
+  assert.equal(journey.end, terima.dtEmpty);
+  assert.equal(journey.counts[5], 2);
+  assert.ok(codes(journey.findings).includes('duplicate-5'));
+  assert.equal(journey.candidates.at(-1).row, rows.at(-1));
+
+  const invalidFinals = [
+    [kirim], [{ ...kirim, RefDumpingTonnageID: null }, terima], [kirim, terima, { ...terima }],
+    [kirim, terima, { ...kirim, CTFinalTonnageID: 999 }],
+    [kirim, { ...terima, EquipmentID: 99 }], [kirim, { ...terima, dtEmpty: stamp('09:17:26.001') }],
+    [kirim, { ...terima, dtDeletedAt: stamp('10:00:00.000') }],
+    [kirim, { ...terima, dtEmpty: null }], [kirim, { ...terima, dtEmpty: stamp('08:00:00.000') }],
+  ];
+  for (const final of invalidFinals) {
+    const groups = groupTruckActivities(rows, final);
+    assert.ok(groups.every(group => group.end === null));
+    assert.deepEqual(groups.flatMap(group => group.rows), rows);
+    assert.equal(analyzeTransactions(final, rows, kirim.CoalDeliveryNumber).journeys[0].end, null);
+  }
+  const extra = { ...rows.at(-1), dtTimeCollected: stamp('09:15:00.000') };
+  const repeated = groupTruckActivities([...rows, extra, rows.at(-1)], finals);
+  assert.equal(repeated.length, 1);
+  assert.equal(repeated[0].rows.length, rows.length + 2);
+  assert.equal(repeated[0].end, Date.parse(terima.dtEmpty));
+  const otherReceipt = { ...terima, CTFinalTonnageID: 999, dtEmpty: stamp('09:13:23.073') };
+  const ambiguousEnds = [{ ...earlier, RefDumpingTonnageID: 999 }, kirim, terima, otherReceipt];
+  assert.equal(groupTruckActivities(rows, ambiguousEnds)[0].end, null);
+  assert.equal(analyzeTransactions(ambiguousEnds, rows, kirim.CoalDeliveryNumber).journeys[0].end, null);
+  const foreignSkReceipt = { ...terima, CoalDeliveryNumber: 'OTHER' };
+  const foreignSkRows = rows.map(row => row.dtTimeCollected === terima.dtEmpty ? { ...row, CoalDeliveryNumber: 'OTHER' } : row);
+  const foreignSkJourney = analyzeTransactions([kirim, foreignSkReceipt], foreignSkRows, kirim.CoalDeliveryNumber).journeys[0];
+  assert.equal(foreignSkJourney.end, terima.dtEmpty);
+  assert.equal(foreignSkJourney.candidates.at(-1).row, foreignSkRows.at(-1));
+  const missingClosing = rows.slice(0, -1);
+  assert.equal(groupTruckActivities(missingClosing, finals)[0].end, null);
+  assert.equal(analyzeTransactions(finals, missingClosing, kirim.CoalDeliveryNumber).journeys[0].end, null);
+  // ID equipment takes precedence over names; missing Kirim activities do not invalidate receipt evidence.
+  const receiptOnly = rows.slice(-3).map(row => ({ ...row, EquipmentID: 1, strTruckCN: null }));
+  assert.equal(groupTruckActivities(receiptOnly, [kirim, terima])[0].end, Date.parse(terima.dtEmpty));
+  assert.equal(analyzeTransactions([kirim, terima], receiptOnly, kirim.CoalDeliveryNumber).journeys[0].end, terima.dtEmpty);
+  const conflictingIds = rows.map(row => ({ ...row, EquipmentID: 99 }));
+  assert.equal(groupTruckActivities(conflictingIds, finals)[0].end, null);
+  assert.equal(analyzeTransactions(finals, conflictingIds, kirim.CoalDeliveryNumber).journeys[0].end, null);
+  // A real next trip before referenced closure cannot be merged, even if its empty activity is absent.
+  const nextTrip = { ...kirim, CTFinalTonnageID: 999, RefDumpingTonnageID: null, CoalDeliveryNumber: 'NEXT', dtEmpty: stamp('09:14:00.000'), dtLoaded: stamp('09:15:00.000') };
+  const conflictRows = [...rows, { trans: 'Kirim - Muat', strTruckCN: 'TR02078', CoalDeliveryNumber: 'NEXT', dtTimeCollected: nextTrip.dtLoaded }];
+  const conflict = groupTruckActivities(conflictRows, [...finals, nextTrip]);
+  assert.equal(conflict.length, 2);
+  assert.equal(conflict[0].end, null);
+  assert.ok(!conflict[0].rows.includes(rows.at(-1)));
+  assert.equal(conflict.flatMap(group => group.rows).length, conflictRows.length);
+  assert.equal(analyzeTransactions([...finals, nextTrip], conflictRows, kirim.CoalDeliveryNumber).journeys[0].end, null);
+});
+
+test('dispatcher marker requires explicit zero milliseconds in all three final timestamps', () => {
   const { isDispatcherCreated } = compiled.exports;
+  const times = { dtTimeCollected: at('11:00'), dtEmpty: at('10:00'), dtLoaded: at('12:00') };
   for (const Transaksi of ['Kirim', 'Terima', 'Loading', 'Dumping']) {
-    for (const dtTimeCollected of ['2026-03-13T23:01:12.000Z', '2026-03-13 23:01:12,000', '2026-03-13T23:01:12.000+08:00']) {
-      assert.equal(isDispatcherCreated({ Transaksi, dtTimeCollected }), true);
-    }
-    for (const dtTimeCollected of [null, '', 'invalid.000', '2026-03-13T23:01:12Z', '2026-03-13T23:01:12.003Z', '2026-03-13T23:01:12.100Z']) {
-      assert.equal(isDispatcherCreated({ Transaksi, dtTimeCollected }), false);
+    assert.equal(isDispatcherCreated({ Transaksi, ...times }), true);
+    for (const field of Object.keys(times)) {
+      for (const time of ['2026-03-13T23:01:12.000Z', '2026-03-13 23:01:12,000', '2026-03-13T23:01:12.000+08:00']) {
+        assert.equal(isDispatcherCreated({ Transaksi, ...times, [field]: time }), true);
+      }
+      for (const time of [undefined, null, '', 0, 'invalid.000', '2026-03-13T23:01:12Z', '2026-03-13T23:01:12.003Z', '2026-03-13T23:01:12.100Z']) {
+        assert.equal(isDispatcherCreated({ Transaksi, ...times, [field]: time }), false, field + ' must have explicit .000');
+      }
     }
   }
   for (const Transaksi of ['RawTerima', 'TerimaRaw', 'RawDumping', 'Kirim - Muat', '']) {
-    assert.equal(isDispatcherCreated({ Transaksi, dtTimeCollected: at('11:00') }), false);
+    assert.equal(isDispatcherCreated({ Transaksi, ...times }), false);
   }
 });
 
@@ -234,7 +315,7 @@ test('MT is optional: direct empty to loaded remains valid without claiming manu
   assert.equal(journey.candidates[0].basis, 'Urutan sebelum SK terbit');
   const open = analyzeTransactions([loading], withoutMt, 'TARGET').journeys[0];
   assert.deepEqual(open.counts, [1, 0, 1, 2, 1, 1]);
-  assert.equal(open.end, at('12:30'));
+  assert.equal(open.end, null, 'missing referenced receipt cannot confirm closure');
   const wrongOrder = analyzeTransactions([loading, dumping, next], [...withoutMt, event('Net Reader', '11:10', { ReaderLocationName: 'MT01' })], 'TARGET').journeys[0];
   assert.ok(codes(wrongOrder.findings).includes('out-of-order'));
 });
@@ -256,7 +337,7 @@ test('pre-CDN empty belongs to following loaded event, even without next trip or
 });
 
 test('Terima Kosong closes CDN inclusively without next Loading and excludes later events', () => {
-  const journey = analyzeTransactions([loading], [...events, event('Tol Gate', '12:40'), event('Kirim - Muat', '12:50', { CoalDeliveryNumber: 'TARGET' }), event('Terima - Kosong', '12:55')], 'TARGET').journeys[0];
+  const journey = analyzeTransactions([loading, dumping], [...events, event('Tol Gate', '12:40'), event('Kirim - Muat', '12:50', { CoalDeliveryNumber: 'TARGET' }), event('Terima - Kosong', '12:55')], 'TARGET').journeys[0];
   assert.equal(journey.end, at('12:30'));
   assert.deepEqual(journey.counts, [1, 1, 1, 2, 1, 1]);
   assert.equal(journey.candidates.at(-1).row.trans, 'Terima - Kosong');

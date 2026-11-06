@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Put, Query, ServiceUnavailableException, UseGuards, UseInterceptors } from '@nestjs/common';
-import { AuthAuditInterceptor, JwtGuard, RequirePermissions } from './auth';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Put, Query, Req, ServiceUnavailableException, UseGuards, UseInterceptors } from '@nestjs/common';
+import { AuthAuditInterceptor, AuthRequest, JwtGuard, RequirePermissions } from './auth';
 import { DbService } from './db';
 import { PcService } from './pc';
 import { PcRegistryService } from './registry';
@@ -174,12 +174,37 @@ export class ApiController {
     return this.db.truckTimeline(coalDeliveryNumber);
   }
   @RequirePermissions('transactions.view', 'timeline.view')
+  @Get('transactions/detail')
+  transactionDetail(@Query('kind') kind: unknown, @Query('tonnageId') value: unknown) {
+    if (kind !== 'Kirim' && kind !== 'Terima') throw new BadRequestException('Jenis transaksi harus Kirim atau Terima.');
+    const id = queryInteger(value, 'ID transaksi');
+    if (id <= 0) throw new BadRequestException('ID transaksi harus integer positif.');
+    return this.db.transactionDetail(kind, id);
+  }
+  @RequirePermissions('transactions.view', 'timeline.view')
   @Get('transactions/relations')
   relatedTransactions(@Query('kind') kind: unknown, @Query('dumpingTonnageId') value: unknown) {
     if (kind !== 'Kirim' && kind !== 'Terima') throw new BadRequestException('Jenis transaksi harus Kirim atau Terima.');
     const id = queryInteger(value, 'CTFinalDumpingTonnageID');
     if (id <= 0) throw new BadRequestException('CTFinalDumpingTonnageID harus integer positif.');
     return this.db.relatedTransactions(kind, id);
+  }
+  @RequirePermissions('transactions.view')
+  @Get('transactions/loading-location')
+  previewLoadingLocation(@Query('loadingTonnageId') value: unknown) {
+    const id = queryInteger(value, 'CTFinalLoadingTonnageID');
+    if (id <= 0) throw new BadRequestException('CTFinalLoadingTonnageID harus integer positif.');
+    return this.db.previewLoadingLocation(id);
+  }
+  @RequirePermissions('transactions.view')
+  @Post('transactions/loading-location')
+  updateLoadingLocation(@Body() body: unknown, @Req() request: AuthRequest) {
+    const data = object(body);
+    const id = integer(data.loadingTonnageId, 'CTFinalLoadingTonnageID');
+    if (id <= 0) throw new BadRequestException('CTFinalLoadingTonnageID harus integer positif.');
+    if (typeof data.previewToken !== 'string' || !/^[a-fA-F0-9]{64}$/.test(data.previewToken)) throw new BadRequestException('Token preview harus SHA256 64 karakter hex.');
+    if (data.confirmed !== true) throw new BadRequestException('Konfirmasi Get LoadingLocation diperlukan.');
+    return this.db.updateLoadingLocation(id, data.previewToken, request.auth.userId);
   }
   @RequirePermissions('transactions.pair')
   @Post('transactions/relations/pair')

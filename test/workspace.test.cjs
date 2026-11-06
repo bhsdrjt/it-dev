@@ -29,8 +29,24 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
     let unlinked = false;
     let pairFails = false;
     let pairTimesOut = false;
+    let stockPileName = 'PIT TEST';
+    let loadingLocationStatus = 200;
+    let loadingLocationMissing = false;
+    let detailFails = false;
+    let loadingLocationPreviewCount = 0;
+    const loadingLocationSource = { LoadingLocationID: 700, strStockPileName: null, CoalQualityID: 31, CoalCalory: 4100, strCoalQualityName: 'OLD SEAM', EquipmentID: 10, dtEmpty: '2026-07-13T11:56:03.000Z', dtLoaded: '2026-07-13T13:36:29.000Z', CoalDeliveryNumber: 'AF260080419' };
+    const loadingLocationCandidate = { LoadingLocationID: 701, strStockPileName: 'READER PIT', CoalQualityID: 42, CoalCalory: 5200, strCoalQualityName: 'READER SEAM', readerAt: '2026-07-13T13:30:00.123Z' };
+    const closingFixture = {
+      transactions: [
+        { Transaksi: 'Kirim', CTFinalTonnageID: 2983074, RefDumpingTonnageID: 4078706, CoalDeliveryNumber: 'AB260693242', EquipmentID: 512, strEquipmentName: 'TR02078', dtEmpty: '2026-11-05T07:18:58.653', dtLoaded: '2026-11-05T08:37:49.887' },
+        { Transaksi: 'Terima', CTFinalTonnageID: 4078706, CoalDeliveryNumber: 'AB260693242', EquipmentID: 512, strEquipmentName: 'TR02078', dtLoaded: '2026-11-05T09:00:44.593', dtEmpty: '2026-11-05T09:17:26.000' },
+      ], activities: [
+        ['Kirim - Kosong', '07:18:58.653'], ['Kirim - Muat', '08:37:49.887'], ['Terima - Muat', '09:00:44.593'],
+        ['Terima - Kosong', '09:13:23.073'], ['Terima - Kosong', '09:17:26.000'],
+      ].map(([trans, time]) => ({ trans, dtTimeCollected: '2026-11-05T' + time, EquipmentID: 512, strTruckCN: 'TR02078', CoalDeliveryNumber: trans === 'Kirim - Muat' ? 'AB260693242' : null })),
+    };
     window.fetch = async (path, options = {}) => {
-      calls.push({ path, body: options.body && JSON.parse(options.body) });
+      calls.push({ path, method: options.method || 'GET', body: options.body && JSON.parse(options.body) });
       if (path === '/auth/me') return { ok: true, json: async () => ({ userId: 1, username: 'operator', displayName: 'Operator', roles: ['operator', 'viewer'], permissions: ['equipment.view', 'equipment.ping', 'equipment.manage_pc', 'equipment.configure', 'monitoring.view', 'transactions.view', 'transactions.copy_loading', 'transactions.generate_receipt', 'transactions.delete', 'transactions.restore', 'transactions.replay_raw', 'transactions.pair', 'transactions.unpair', 'timeline.view', 'coal.view', 'coal.update', 'coal.delete', 'coal.import', 'activity.view'] }) };
       if (requestDelay) await new Promise(resolve => setTimeout(resolve, requestDelay));
       if (path === '/equipment-checks/upsert' && upsertFails) return { ok: false, status: 502, json: async () => ({ message: 'API gagal mengonfirmasi penyimpanan.' }) };
@@ -50,6 +66,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       if (path.startsWith('/transactions/truck-history?')) {
         const query = new URL(path, location.origin).searchParams;
         if (holdHistory) { holdHistory = false; await new Promise(resolve => { releaseHistory = resolve; }); }
+        if (query.get('equipmentId') === '512') return { ok: true, json: async () => ({ ...closingFixture, equipmentId: 512, starttime: query.get('starttime'), endtime: query.get('endtime') }) };
         if (query.get('equipmentId') === '12') return { ok: false, status: 503, json: async () => ({ message: 'Database pusat tidak tersedia.' }) };
         const empty = query.get('equipmentId') === '11';
         return { ok: true, json: async () => ({ equipmentId: Number(query.get('equipmentId')), starttime: '2026-04-01T06:00:00.000Z', endtime: '2026-04-02T23:00:00.000Z', transactions: empty ? [] : query.get('equipmentId') === '333' ? Array.from({ length: 101 }, (_, index) => ({ Transaksi: 'Kirim', CTFinalTonnageID: index + 1, CoalDeliveryNumber: 'PAGE-' + (index + 1), dturutan: '2026-04-01T07:00:00.000Z' })) : [{ Transaksi: 'Kirim', CTFinalTonnageID: 71, RefDumpingTonnageID: 77, CoalDeliveryNumber: 'HISTORY-ONLY', dturutan: '2026-04-01T07:00:00.000Z', dtEmpty: '2026-04-01T06:00:00.000Z', dtLoaded: '2026-04-01T07:00:00.000Z', dtDeletedAt: null }, { Transaksi: 'RawTerima', CTFinalTonnageID: 72, dturutan: '2026-04-01T08:00:00.000Z', dtDeletedAt: '2026-04-02T09:00:00.000Z' }], activities: empty ? [] : [{ trans: 'Kirim - Kosong', dtTimeCollected: '2026-04-01T06:00:00.000Z', ReaderLocationName: 'HISTORY READER', flTonnage: 0 }] }) };
@@ -63,6 +80,22 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       if (path === '/transactions/salin-muatan/ke-terima-ada') return { ok: true, json: async () => ({ message: 'Salin muatan ke SK terima berhasil' }) };
       if (path === '/transactions/salin-muatan' && copyStatus !== 200) return { ok: false, status: copyStatus, json: async () => ({ message: copyStatus === 409 ? 'Timbang muat/kosong tujuan yang memenuhi aturan procedure tidak ditemukan.' : 'Hasil Salin Muatan belum dapat dipastikan.' }) };
       if (path === '/transactions/salin-muatan' || path === '/transactions/delete' || path === '/transactions/restore' || path === '/transactions/generate-sk-terima') return { ok: true, json: async () => ({ message: 'Aksi berhasil' }) };
+      if (path.startsWith('/transactions/loading-location?')) {
+        check(path === '/transactions/loading-location?loadingTonnageId=1' && (!options.method || options.method === 'GET'), 'loading location preview reads selected ID');
+        loadingLocationPreviewCount++;
+        return { ok: !loadingLocationMissing, status: loadingLocationMissing ? 404 : 200, json: async () => loadingLocationMissing ? { message: 'Reader kandidat tidak ditemukan.' } : { source: loadingLocationSource, candidate: loadingLocationCandidate, receipt: { ...loadingLocationSource, CTFinalDumpingTonnageID: 2, CoalDeliveryNumber: 'PAIRED-RECEIPT' }, previewToken: 'fixture-preview-' + loadingLocationPreviewCount } };
+      }
+      if (path === '/transactions/loading-location') {
+        check(options.method === 'POST', 'loading location save uses POST');
+        if (loadingLocationStatus === 200) stockPileName = loadingLocationCandidate.strStockPileName;
+        return { ok: loadingLocationStatus === 200, status: loadingLocationStatus, json: async () => ({ message: loadingLocationStatus === 200 ? 'LoadingLocation berhasil diperbarui.' : loadingLocationStatus === 409 ? 'Preview kedaluwarsa; sumber atau kandidat berubah.' : 'Hasil perubahan belum dapat dipastikan.' }) };
+      }
+      if (path.startsWith('/transactions/detail?')) {
+        const query = new URL(path, location.origin).searchParams;
+        check(query.get('kind') === 'Kirim' && query.get('tonnageId') === '1', 'detail queries selected final ID');
+        if (detailFails) return { ok: false, status: 503, json: async () => ({ message: 'Detail DB tidak tersedia.' }) };
+        return { ok: true, json: async () => ({ CTFinalLoadingTonnageID: 1, CoalDeliveryNumber: 'FRESH-DB-SK', EquipmentID: 10, dtLoaded: '2026-07-13T13:36:29.000Z', strStockPileName: null, strDumpingLocationName: 'DB PORT', IsValid: false, IsAutoReconcile: false, IsManualReconcile: false, flEmptyTonnage: 0 }) };
+      }
       if (path.startsWith('/transactions/relations?')) {
         const query = new URL(path, location.origin).searchParams;
         if (query.get('dumpingTonnageId') !== '2') throw Error('Wrong relation ID');
@@ -81,6 +114,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
       if (path.startsWith('/transactions/timeline?')) {
         const number = new URL(path, location.origin).searchParams.get('coalDeliveryNumber');
         if (holdTimeline) { holdTimeline = false; await new Promise(resolve => { releaseTimeline = resolve; }); }
+        if (number === 'AB260693242') return { ok: true, json: async () => ({ ...closingFixture, coalDeliveryNumber: number }) };
         if (number.startsWith('COVERAGE-')) {
           const [finalCount, rawCount, activityCount] = number.slice(9).split('-').map(Number);
           return { ok: true, json: async () => ({ coalDeliveryNumber: number,
@@ -92,7 +126,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         }
         if (number === 'MISSING') return { ok: false, status: 404, json: async () => ({ message: 'Data tidak ditemukan untuk CoalDeliveryNumber tersebut.' }) };
         return { ok: true, json: async () => ({ coalDeliveryNumber: number, transactions: [
-          { Transaksi: 'Kirim', CTFinalTonnageID: 1, RefDumpingTonnageID: unlinked ? null : 2, CoalDeliveryNumber: number, strEquipmentName: 'TR-10', EquipmentID: 10, UserName: 'DISPATCHER01', dtEmpty: '2026-07-13T11:56:03.000Z', dtLoaded: '2026-07-13T13:36:29.000Z', dtTimeCollected: '2026-07-13T13:36:29.000Z', IsValid: false, IsAutoReconcile: false, IsManualReconcile: false, strStockPileName: 'PIT TEST', strDumpingLocationName: 'CRUSHER TEST' },
+          { Transaksi: 'Kirim', CTFinalTonnageID: 1, LoadingLocationID: loadingLocationSource.LoadingLocationID, RefDumpingTonnageID: unlinked ? null : 2, CoalDeliveryNumber: number, strEquipmentName: 'TR-10', EquipmentID: 10, UserName: 'DISPATCHER01', dtEmpty: '2026-07-13T11:56:03.000Z', dtLoaded: '2026-07-13T13:36:29.000Z', dtTimeCollected: '2026-07-13T13:36:29.000Z', IsValid: false, IsAutoReconcile: false, IsManualReconcile: false, strStockPileName: stockPileName, strDumpingLocationName: 'CRUSHER TEST' },
           { Transaksi: 'Terima', CTFinalTonnageID: 2, CoalDeliveryNumber: number, IsValid: false, dtDeletedAt: '2026-07-14T09:10:00.000Z' },
           { Transaksi: 'RawDumping', CTFinalTonnageID: 3, CoalDeliveryNumber: 'OTHER', IsValid: null, dtDeletedAt: '2026-07-14T09:10:00.000Z' },
           { Transaksi: 'RawDumping', CTFinalTonnageID: 4, CoalDeliveryNumber: 'OTHER', dtDeletedAt: null },
@@ -295,16 +329,33 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(![...tripGroups[0].querySelectorAll('.transaction-card h3')].some(node => node.textContent.includes('Raw')), 'raw excluded from grouped final timeline');
         const firstCard = document.querySelector('.transaction-timeline article');
         const details = firstCard.querySelector('.transaction-details');
-        const detailToggle = details.querySelector('summary');
+        const detailToggle = details.querySelector(':scope > button');
         const actionToggle = firstCard.querySelector('.card-actions > button');
         check(detailToggle.getAttribute('aria-label') === 'Detail seluruh kolom' && !detailToggle.textContent.trim() && detailToggle.querySelector('svg'), 'detail toggle is labeled icon only');
         const detailRect = detailToggle.getBoundingClientRect(), detailActionRect = actionToggle.getBoundingClientRect();
         check(Math.abs(detailRect.right - detailActionRect.right) < 1 && detailRect.top >= detailActionRect.bottom && detailRect.top - detailActionRect.bottom <= 6, 'detail icon sits directly below action menu');
         check(detailRect.width === detailActionRect.width && getComputedStyle(detailToggle).borderTopWidth === '1px', 'detail icon matches action button size and border');
         detailToggle.click(); await tick();
-        check(details.open && details.querySelector('dl').getBoundingClientRect().height > 0, 'detail icon expands columns');
+        const detailModal = details.querySelector('dialog');
+        check(detailModal.open && detailModal.matches(':modal') && details.querySelector('dl').getBoundingClientRect().height > 0, 'detail opens modal with columns');
+        check(detailModal.textContent.includes('FRESH-DB-SK') && detailModal.textContent.includes('NULL'), 'detail uses fresh DB data and explicit NULL');
+        check(detailModal.querySelectorAll('.detail-section').length >= 4, 'detail groups readable sections');
+        const detailSearch = detailModal.querySelector('input[type="search"]');
+        change(detailSearch, 'flEmptyTonnage'); await tick();
+        check(detailModal.querySelectorAll('dt').length === 1 && detailModal.querySelector('dd').textContent === '0', 'detail filter preserves zero');
+        change(detailSearch, ''); await tick();
+        const modalRect = detailModal.getBoundingClientRect();
+        check(modalRect.left >= 0 && modalRect.right <= innerWidth && modalRect.top >= 0 && modalRect.bottom <= innerHeight, 'detail modal fits viewport');
+        check(document.activeElement.textContent === 'Tutup' && detailModal.querySelector('h2').textContent.includes('Kirim'), 'detail modal labels source and focuses close');
+        detailModal.querySelector('button').click(); await tick();
+        check(!detailModal.open && document.activeElement === detailToggle, 'closing modal restores detail trigger focus');
+        detailFails = true;
         detailToggle.click(); await tick();
-        check(!details.open, 'detail icon collapses columns');
+        check(detailModal.querySelector('[role="alert"]').textContent.includes('Detail DB tidak tersedia') && !detailModal.querySelector('dl'), 'failed detail does not reuse prior result');
+        detailFails = false;
+        [...detailModal.querySelectorAll('button')].find(node => node.textContent === 'Coba lagi').click(); await tick();
+        check(detailModal.textContent.includes('FRESH-DB-SK'), 'retry fetches fresh detail');
+        detailModal.querySelector('.panel-heading button').click(); await tick();
         for (const key of ['strStockPileName', 'strDumpingLocationName', 'IsValid', 'IsAutoReconcile', 'IsManualReconcile']) check([...details.querySelectorAll('dt')].some(node => node.textContent.trim() === key), 'removed summary field retained in details: ' + key);
         const summary = firstCard.cloneNode(true);
         summary.querySelector('.transaction-details').remove();
@@ -325,7 +376,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
           const inspect = document.querySelector('button[aria-label="Cek relasi ' + kind + ' ' + id + '"]');
           checkIcon(inspect);
           inspect.focus(); inspect.click(); await tick();
-          const modal = document.querySelector('.relation-modal');
+          const modal = document.querySelector('.relation-modal:not(.transaction-detail-modal)');
           check(modal.open && modal.querySelector('h2').textContent.includes(kind + ' #' + id), 'relation modal opens with source ID');
           check(modal.querySelectorAll('tbody tr').length === count, 'relation table shows all matching rows');
           check(modal.querySelector('.deleted-record .deleted-status').textContent.includes('Sudah dihapus'), 'deleted relation marked');
@@ -333,7 +384,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
           if (kind === 'Kirim') modal.querySelector('button').click();
           else modal.dispatchEvent(new Event('cancel', { cancelable: true }));
           await tick();
-          check(!document.querySelector('.relation-modal'), 'close and Escape dismiss relation modal');
+          check(!document.querySelector('.relation-modal:not(.transaction-detail-modal)'), 'close and Escape dismiss relation modal');
           check(document.activeElement === inspect, 'modal restores trigger focus');
         }
         const releaseButton = () => document.querySelector('button[aria-label="Lepas relasi Kirim 1 dari Terima 2"]');
@@ -534,6 +585,83 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
           if (status === 503) { document.querySelector('.transaction-search').requestSubmit(); await tick(); }
         }
         copyStatus = 200;
+        stockPileName = null;
+        document.querySelector('.transaction-search').requestSubmit(); await tick();
+        const locationWrites = () => calls.filter(row => row.path === '/transactions/loading-location');
+        const locationModal = () => document.querySelector('.loading-location-modal[open]');
+        const openLocation = async () => {
+          cardAction().click(); await tick();
+          button('Get LoadingLocation').click(); await tick();
+          check(locationModal(), 'loading location preview opens native app dialog');
+        };
+        await openLocation();
+        const previewModal = locationModal();
+        check(previewModal.getAttribute('aria-labelledby') === 'loading-location-title' && previewModal.querySelector('h2').textContent.includes('Kirim #1'), 'loading location preview identifies source accessibly');
+        check(document.activeElement.textContent === 'Tutup', 'loading location preview defaults focus to safe close');
+        const previewRect = previewModal.getBoundingClientRect();
+        check(previewRect.left >= 0 && previewRect.right <= innerWidth && previewRect.top >= 0 && previewRect.bottom <= innerHeight, 'loading location preview fits viewport');
+        check(previewModal.textContent.includes('AF260080419') && previewModal.textContent.includes('EquipmentID 10'), 'loading location source SK and equipment shown');
+        for (const time of ['2026-07-13 11:56:03.000', '2026-07-13 13:36:29.000', '2026-07-13 13:30:00.123']) check(previewModal.textContent.includes(time), 'loading location source range and reader timestamp: ' + time);
+        const previewRows = [...previewModal.querySelectorAll('[aria-label="Preview Get LoadingLocation"] tbody tr')];
+        const locationFields = ['LoadingLocationID', 'strStockPileName', 'CoalQualityID', 'CoalCalory', 'strCoalQualityName'];
+        check(previewRows.length === 5, 'loading location preview has exactly five changed columns');
+        check(previewModal.querySelectorAll('[aria-label="Preview pasangan Terima"] tbody tr').length === 5 && previewModal.textContent.includes('PAIRED-RECEIPT'), 'paired receipt preview shows ID, SK and all five updates');
+        locationFields.forEach((field, index) => {
+          const cells = [...previewRows[index].children].map(cell => cell.textContent);
+          check(cells.join('|') === [field, loadingLocationSource[field] === null ? '—' : String(loadingLocationSource[field]), String(loadingLocationCandidate[field])].join('|'), 'loading location old/new values for ' + field);
+        });
+        answerConfirmation = () => false;
+        previewModal.querySelector('.primary').click(); await tick();
+        check(locationWrites().length === 0 && locationModal() && !locationModal().querySelector('.primary').disabled, 'cancel loading location confirmation keeps preview without POST');
+        locationModal().querySelector('.panel-heading button').click(); await tick();
+        check(!locationModal() && locationWrites().length === 0, 'close loading location preview never writes');
+        await openLocation();
+        answerConfirmation = message => {
+          check(message.includes('Kirim #1') && message.includes('AF260080419') && message.includes('Terima #2') && message.includes('PAIRED-RECEIPT') && locationFields.every(field => message.includes(field)) && message.includes('trigger'), 'loading location confirmation names source, five fields and trigger effects');
+          return true;
+        };
+        const locationReadsBeforeSave = calls.filter(row => row.path.startsWith('/transactions/timeline?')).length;
+        const locationSave = locationModal().querySelector('.primary');
+        locationSave.click(); locationSave.click(); await tick();
+        check(locationWrites().length === 1 && locationWrites()[0].method === 'POST', 'loading location double click sends exactly one POST');
+        const locationBody = locationWrites()[0].body;
+        check(Object.keys(locationBody).sort().join('|') === 'confirmed|loadingTonnageId|previewToken' && locationBody.loadingTonnageId === 1 && locationBody.previewToken === 'fixture-preview-' + loadingLocationPreviewCount && locationBody.confirmed === true, 'loading location POST sends only selected ID, current preview token and confirmation');
+        check(!locationModal() && calls.filter(row => row.path.startsWith('/transactions/timeline?')).length === locationReadsBeforeSave + 1, 'loading location success closes preview and reloads timeline once');
+        check(document.querySelector('.transaction-workspace [role="status"]').textContent.includes('LoadingLocation berhasil'), 'loading location save success announced');
+        cardAction().click(); await tick();
+        check(!button('Get LoadingLocation'), 'reloaded nonnull LoadingLocation hides action');
+        cardAction().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await tick();
+        stockPileName = null;
+        document.querySelector('.transaction-search').requestSubmit(); await tick();
+        for (const status of [409, 503]) {
+          loadingLocationStatus = status;
+          const previousPreviews = loadingLocationPreviewCount;
+          await openLocation();
+          check(loadingLocationPreviewCount === previousPreviews + 1, 'reopening after loading location rejection requires fresh preview');
+          const previousWrites = locationWrites().length;
+          const previousReads = calls.filter(row => row.path.startsWith('/transactions/timeline?')).length;
+          locationModal().querySelector('.primary').click(); await tick();
+          check(locationWrites().length === previousWrites + 1 && !locationModal() && !document.querySelector('.confirm-modal'), 'loading location failure sends once and releases dialog focus');
+          check(calls.filter(row => row.path.startsWith('/transactions/timeline?')).length === previousReads, 'loading location failure never silently reloads or retries');
+          const locationError = document.querySelector('.transaction-workspace [role="alert"]').textContent;
+          check(status === 409 ? locationError.includes('Preview kedaluwarsa') && locationError.includes('preview') : locationError.includes('Muat ulang'), 'loading location stale rejection or uncertain result explained');
+          check(cardAction().disabled === (status === 503), 'only uncertain loading location save blocks mutations');
+          if (status === 503) {
+            document.querySelector('.transaction-workspace [aria-label="Tutup notifikasi"]').click(); await tick();
+            cardAction().click(); await tick();
+            check(cardAction().disabled && !document.querySelector('.card-actions-options') && locationWrites().length === previousWrites + 1, 'dismissing uncertain loading location error cannot enable repeat POST');
+            document.querySelector('.transaction-search').requestSubmit(); await tick();
+            check(!cardAction().disabled, 'fresh timeline unlocks loading location mutations');
+          }
+        }
+        loadingLocationStatus = 200; loadingLocationMissing = true;
+        const writesBeforeMissingLocation = locationWrites().length;
+        await openLocation();
+        check(locationModal().querySelector('[role="alert"]').textContent.includes('Reader kandidat tidak ditemukan') && !locationModal().querySelector('.primary'), 'missing reader candidate displays failure without save action');
+        locationModal().querySelector('.panel-heading button').click(); await tick();
+        check(locationWrites().length === writesBeforeMissingLocation, 'missing candidate never POSTs');
+        loadingLocationMissing = false; stockPileName = undefined;
+        document.querySelector('.transaction-search').requestSubmit(); await tick();
         cardAction().click(); await tick();
         answerConfirmation = () => true;
         const skOption = () => [...document.querySelectorAll('.card-actions-options button')].find(node => node.textContent === 'Generate SK Terima');
@@ -551,19 +679,14 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         document.querySelector('.card-actions-options .danger').click(); await tick();
         const deletion = calls.find(row => row.path === '/transactions/delete');
         check(deletion.body.kind === 'Kirim' && deletion.body.tonnageId === 1 && deletion.body.confirmed, 'delete sends selected kind and ID');
-        for (const [counts, expected] of [
-          ['9-9-29', []], ['10-0-0', ['Kirim / Terima (gabungan): 10']],
-          ['0-10-0', ['TerimaRaw: 10']], ['0-0-30', ['Aktivitas truck: 30']],
-          ['11-11-31', ['Kirim / Terima (gabungan): 11', 'TerimaRaw: 11', 'Aktivitas truck: 31']], ['0-0-0', []],
-        ]) {
+        for (const counts of ['9-9-29', '10-0-0', '0-10-0', '0-0-30', '11-11-31', '0-0-0']) {
           change(cdn, 'COVERAGE-' + counts); await tick();
           document.querySelector('.transaction-search').requestSubmit(); await tick();
           const coverage = document.querySelector('[aria-label="Cakupan hasil procedure"]');
-          check(coverage && coverage.textContent.includes('Data yang tidak muncul belum tentu tidak ada'), 'coverage caveat remains below threshold and for empty results');
-          check(coverage.classList.contains('transaction-coverage-warning') === !!expected.length, 'warning matches threshold: ' + counts);
-          check(expected.every(text => coverage.textContent.includes(text)), 'warning uses all SK, deleted rows, raw aliases and assignments: ' + counts);
-          for (const label of ['Kirim / Terima (gabungan):', 'TerimaRaw:', 'Aktivitas truck:']) {
-            check(coverage.textContent.includes(label) === expected.some(text => text.startsWith(label)), 'only reached limits listed: ' + label);
+          check(coverage && coverage.textContent.includes('Data yang tidak muncul belum tentu tidak ada'), 'coverage caveat remains for all results');
+          check(!coverage.classList.contains('transaction-coverage-warning'), 'no threshold warning shown: ' + counts);
+          for (const label of ['Kirim / Terima (gabungan):', 'TerimaRaw:', 'Aktivitas truck:', 'Data mungkin terpotong', 'ambang']) {
+            check(!coverage.textContent.includes(label), 'no limit label shown: ' + label);
           }
           for (const tab of document.querySelectorAll('[aria-label="Hasil analisa transaksi"] button')) {
             tab.click(); await tick();
@@ -576,6 +699,17 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(document.querySelector('.transaction-workspace [role="alert"]').textContent.includes('tidak ditemukan'), 'not found shown');
         check(!document.querySelector('.transaction-results'), 'old results cleared after failure');
         check(!document.querySelector('.transaction-coverage'), 'coverage removed with failed search results');
+        change(cdn, 'AB260693242'); await tick();
+        document.querySelector('.transaction-search').requestSubmit(); await tick();
+        const checkReceiptClosure = root => {
+          const trips = root.querySelectorAll('[aria-label="Ritase aktivitas truck"] > .truck-trip');
+          check(trips.length === 1, 'repeated receipt empty does not create extra trip');
+          check(trips[0].querySelector('.trip-heading').textContent.includes('Selesai 2026-11-05 09:17:26.000'), 'group ends at referenced exact empty time');
+          check(trips[0].querySelectorAll('.activity-stage-5').length === 2 && trips[0].textContent.includes('09:13:23.073'), 'both empty readings retained');
+          check(trips[0].textContent.includes('Timbang kosong Terima tercatat lebih dari sekali'), 'repeated empty notice visible');
+        };
+        [...document.querySelectorAll('[aria-label="Hasil analisa transaksi"] button')].find(node => node.textContent.includes('Aktivitas truck')).click(); await tick();
+        checkReceiptClosure(document.querySelector('.transaction-workspace'));
         const beforeHistory = calls.length;
         button('Timeline truck').click(); await tick();
         check(calls.length === beforeHistory + 1 && calls.at(-1).path === '/equipments?activeOnly=true', 'first history opening loads reference only, not transactions');
@@ -605,7 +739,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         const checkHistoryDetailPosition = () => {
           for (const card of history.querySelectorAll('.transaction-timeline article')) {
             const cardBounds = card.getBoundingClientRect();
-            const iconBounds = card.querySelector('.column-details > summary').getBoundingClientRect();
+            const iconBounds = card.querySelector('.column-details > :is(summary,button)').getBoundingClientRect();
             check(Math.abs(cardBounds.right - iconBounds.right - 7) < 1 && Math.abs(iconBounds.top - cardBounds.top - 5) < 1, 'history detail icon stays at card top right');
           }
         };
@@ -617,8 +751,8 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         checkHistoryDetailPosition();
         [...history.querySelectorAll('.view-tabs button')].find(node => node.textContent.includes('Aktivitas truck')).click(); await tick();
         check(history.textContent.includes('HISTORY READER') && history.textContent.includes('Tonase 0'), 'history shows second result set and zero tonnage');
-        check(history.querySelector('.truck-trip .trip-heading').textContent.includes('Ritase 1') && history.querySelector('.truck-trip .status').textContent === 'Belum lengkap', 'history groups incomplete activity into labeled trip');
-        check(history.querySelector('.activity-stage-0 .timeline-marker svg') && history.querySelector('.trip-notes').textContent.includes('Akhir ritase tidak terlihat'), 'activity type icon and incomplete boundary shown');
+        check(history.querySelector('.truck-trip .trip-heading').textContent.includes('Ritase 1') && history.querySelector('.truck-trip .status').textContent === 'Penutup belum terverifikasi', 'history groups incomplete activity into labeled trip');
+        check(history.querySelector('.activity-stage-0 .timeline-marker svg') && history.querySelector('.trip-notes').textContent.includes('Penutup belum terverifikasi'), 'activity type icon and incomplete boundary shown');
         checkHistoryDetailPosition();
         const activityTime = history.querySelector('.transaction-timeline .transaction-times');
         check(activityTime.textContent.includes('dtTimeCollected') && activityTime.querySelector('time').textContent === '2026-04-01 06:00:00.000', 'activity shows labeled dtTimeCollected without opening details or shifting time');
@@ -630,8 +764,13 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(history.querySelector('.truck-trip .trip-heading').textContent.includes('Ritase 1') && history.querySelector('.truck-trips').textContent.includes('RefDumpingTonnageID'), 'transaction trip separators explain reference grouping');
         kirimCard.querySelector('[title="Cek relasi"]').click(); await tick();
         check(document.querySelector('.relation-modal[open]') && document.querySelector('#relation-modal-title').textContent.includes('Cek relasi'), 'history opens relation lookup');
-        document.querySelector('.relation-modal .panel-heading button').click(); await tick();
+        document.querySelector('.relation-modal[open] .panel-heading button').click(); await tick();
         check(!document.querySelector('.relation-modal[open]'), 'relation lookup closes');
+        change(document.querySelector('#history-truck'), '512'); await tick();
+        history.querySelector('form').requestSubmit(); await tick();
+        [...history.querySelectorAll('.view-tabs button')].find(node => node.textContent.includes('Aktivitas truck')).click(); await tick();
+        checkReceiptClosure(history);
+        [...history.querySelectorAll('.view-tabs button')].find(node => node.textContent.includes('Kirim / Terima')).click(); await tick();
         change(document.querySelector('#history-truck'), '11'); await tick();
         history.querySelector('form').requestSubmit(); await tick();
         history = document.querySelector('.truck-history');
@@ -819,7 +958,7 @@ for (const size of ['1280,720', '1440,900', '390,844']) test(`workspace ${size}:
         check(document.documentElement.scrollHeight <= innerHeight, 'coal calory panel fits viewport after sorting');
         button('Equipment checks').click(); await tick();
         document.body.dataset.testResult = 'passed';
-      } catch (error) { document.body.dataset.testResult = 'failed: ' + error.message; }
+      } catch (error) { document.body.dataset.testResult = 'failed: ' + (error.stack || error.message); }
     });
   `;
   const server = createServer(async (request, response) => {

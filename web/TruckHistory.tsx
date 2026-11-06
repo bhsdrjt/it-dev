@@ -120,7 +120,7 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
   }
   const transactions = result?.transactions.filter(row => transactionKind(row) !== 'TerimaRaw') ?? [];
   const rows = tab === 'transactions' ? transactions : result?.activities ?? [];
-  const groups = useMemo(() => groupTruckActivities(result?.activities ?? []), [result]);
+  const groups = useMemo(() => groupTruckActivities(result?.activities ?? [], result?.transactions ?? []), [result]);
   const transactionGroups = useMemo(() => groupTruckTransactions(result?.transactions.filter(row => transactionKind(row) !== 'TerimaRaw') ?? []), [result]);
   // ponytail: pagination lokal; pindahkan ke procedure jika payload besar. Ritase tidak dipecah antarhalaman.
   const pageSize = 10;
@@ -132,7 +132,7 @@ export function TruckHistory({ api, initialTarget = null }: Props) {
       <article>
         <div className="transaction-title"><h3>{transactionKind(row)}</h3></div>
         <div className="transaction-meta"><span>SK {text(row.CoalDeliveryNumber)}</span><span className="mono">ID {text(row.CTFinalTonnageID)}</span>{['Kirim', 'Terima'].includes(transactionKind(row)) && <button type="button" className="transaction-icon-button" title="Cek relasi" onClick={() => setRelationRow(row)} aria-label={`Cek relasi ${transactionKind(row)} ${text(row.CTFinalTonnageID)}`}><ActionIcon action="inspect" /></button>}{transactionKind(row) === 'Kirim' && <span>RefRelasi: <strong>{text(row.RefDumpingTonnageID)}</strong></span>}</div>
-        <Details row={row} />
+        <Details row={row} api={api} />
         <div className="transaction-times"><span>Timbang kosong <time>{time(row.dtEmpty)}</time></span><span>Timbang muat <time>{time(row.dtLoaded)}</time></span></div>
         {row.dtDeletedAt != null && <span className="deleted-status">Sudah dihapus · {time(row.dtDeletedAt)}</span>}
       </article>

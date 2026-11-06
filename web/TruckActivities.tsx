@@ -19,7 +19,7 @@ export function TruckActivities({ groups, offset, searchedCdn, beforeCdn, inTrip
         : inTrip?.has(row) ? { label: 'Ritase SK ini · hingga Terima Kosong', tone: 'online' }
           : { label: row.CoalDeliveryNumber ? 'SK lain' : 'SK tidak tercatat', tone: 'unknown' };
   return <div className="truck-trips" tabIndex={0} role="region" aria-label="Ritase aktivitas truck">
-    <p className="helper">Urutan ideal: Kirim kosong · MT (opsional) · Kirim muat · Tollgate · Terima muat · Terima kosong. Kelengkapan hanya berdasarkan hasil dalam rentang pencarian. New Assignment mencatat perubahan assignment truck, bukan tahap timbang atau batas ritase; SK tidak ditentukan oleh catatan ini.</p>
+    <p className="helper">Urutan ideal: Kirim kosong · MT (opsional) · Kirim muat · Tollgate · Terima muat · Terima kosong. Penutup wajib cocok persis dengan dtEmpty Terima yang direferensikan pada truck yang sama. Pembacaan kosong berulang tetap ditampilkan; penyebab belum dipastikan. Kelengkapan hanya berdasarkan hasil dalam rentang pencarian. New Assignment mencatat perubahan assignment truck, bukan tahap timbang atau batas ritase; SK tidak ditentukan oleh catatan ini.</p>
     {groups.map((group, index) => <section className="truck-trip" key={offset + index} aria-label={`${group.status === 'Perubahan assignment' ? 'Perubahan assignment' : 'Ritase'} ${offset + index + 1}`}>
       <header className="trip-heading">
         <div>{group.status === 'Perubahan assignment' ? <h3>Perubahan assignment · di luar ritase yang terlihat</h3> : <>

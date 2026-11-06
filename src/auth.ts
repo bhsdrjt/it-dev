@@ -55,7 +55,7 @@ export class AuthAuditInterceptor implements NestInterceptor {
       }
       const query: Record<string, string> = {};
       if (request.method === 'GET') {
-        for (const key of ['activeOnly', 'apiId', 'equipmentId', 'coalDeliveryNumber', 'nextDT', 'kind', 'dumpingTonnageId', 'start', 'end', 'starttime', 'endtime', 'code', 'truck', 'cdn', 'severity', 'category']) {
+        for (const key of ['activeOnly', 'apiId', 'equipmentId', 'coalDeliveryNumber', 'nextDT', 'kind', 'tonnageId', 'dumpingTonnageId', 'loadingTonnageId', 'start', 'end', 'starttime', 'endtime', 'code', 'truck', 'cdn', 'severity', 'category']) {
           const value: unknown = request.query?.[key];
           if (typeof value === 'string') query[key] = value.slice(0, 200);
         }

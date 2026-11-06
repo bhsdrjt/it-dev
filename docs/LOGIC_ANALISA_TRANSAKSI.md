@@ -140,11 +140,13 @@ CDN biasanya terbit saat Muat Kirim. Mengikutkan Kosong Kirim/MT sebelumnya tida
 
 ### Menentukan batas berikutnya dan penutup
 
-- Cari Kirim lain pada truck sama dengan `dtEmpty` setelah awal ritase; ambil yang paling awal dan bulatkan turun ke detik.
-- Cari aktivitas setelah `dtLoaded` yang berupa Kosong Kirim, atau Muat Kirim dengan CDN terisi dan berbeda.
-- `cutoff` adalah waktu paling awal dari dua batas tersebut. Jika keduanya tidak terlihat, nilainya `Infinity`.
-- Penutup adalah Kosong Terima pertama pada/selepas `dtLoaded`, sebelum `cutoff`, dengan CDN kosong atau sama.
-- Kosong Terima penutup **ikut dihitung**; semua aktivitas setelahnya tidak ikut, walaupun CDN sama. Aktivitas tepat pada `cutoff` juga tidak ikut.
+- `tripCutoff()` memakai Kirim berikut pada truck sama dengan `dtEmpty > dtLoaded` ritase ini, atau aktivitas Kosong Kirim/Muat Kirim SK berbeda setelah muat. Waktu batas tidak dibulatkan. Muat SK berbeda yang terbukti memakai `dtEmpty` Kirim sama tidak otomatis memulai ritase baru; dua SK tetap diberi catatan.
+- `cutoff` adalah batas paling awal; tanpa bukti ritase berikutnya nilainya `Infinity`.
+- `verifiedClosing()` mencari Terima dari `RefDumpingTonnageID` unik, tidak dipakai Kirim lain, pada truck sama, dan Kirim/Terima tidak dihapus. Waktu Terima harus valid dan berurutan setelah muat Kirim.
+- Penutup wajib aktivitas Kosong Terima pada truck sama dengan `dtTimeCollected` **sama persis hingga milidetik** dengan `dtEmpty` Terima terkait, sebelum `cutoff`. Tidak memakai pembacaan pertama atau toleransi satu detik. CDN aktivitas kosong atau sama dengan Terima terkait.
+- Tanpa pasangan/aktivitas yang cocok, atau penutup ambigu, akhir tetap null: **Penutup belum terverifikasi**. Referensi melewati awal ritase berikutnya menghasilkan catatan konflik, bukan menggabungkan lintas ritase.
+- Kosong Terima penutup **ikut dihitung**; pembacaan kosong sebelumnya tetap dalam ritase. Pembacaan berulang mendapat catatan tanpa menyimpulkan masalah hardware. Aktivitas setelah penutup tidak dimasukkan ke journey; pengelompokan aktivitas tetap menampilkannya terpisah sebagai hasil yang belum terverifikasi.
+- `groupTruckActivities(activities, transactions)` memakai aturan penutup yang sama pada Analisa transaksi dan Timeline truck. Seluruh aktivitas tetap ditampilkan; New Assignment tidak menentukan batas. Kasus AB260693242 menutup pada 2026-11-05 09:17:26.000 (Terima #4078706), bukan pembacaan 09:13:23.073.
 
 Jendela valid jika awal dan `dtLoaded` valid, `dtLoaded >= start`, serta `dtLoaded < cutoff`. Jendela tidak valid menghasilkan `invalid-window`; kandidat dan hitungan tahap tetap kosong/nol.
 
@@ -152,29 +154,29 @@ Jendela valid jika awal dan `dtLoaded` valid, `dtLoaded >= start`, serta `dtLoad
 
 Untuk setiap aktivitas pada snapshot:
 
-1. Tolak jika nama truck kedua sisi tersedia tetapi berbeda.
+1. Identitas aktivitas memakai EquipmentID jika kedua sisi tersedia; jika tidak, cocokkan strTruckCN dengan strEquipmentName. Identitas terisi yang berbeda ditolak.
 2. Abaikan waktu tidak valid.
 3. Tolak aktivitas di luar batas awal, penutup, atau cutoff.
-4. Tolak CDN terisi yang berbeda.
-5. Jika CDN tidak cocok eksplisit, identitas nama truck harus cocok menurut `key()`.
+4. Tolak CDN terisi yang berbeda, kecuali baris penutup terverifikasi dari Terima terkait (perbedaan SK tetap menjadi temuan pasangan).
+5. Jika CDN tidak cocok eksplisit, identitas truck harus terverifikasi.
 6. Simpan baris asli beserta `basis`, lalu urutkan kandidat menurut waktu.
 
 Prioritas `basis`: `CDN eksplisit`, lalu `Urutan sebelum CDN terbit`, lalu `Urutan ritase hingga Terima Kosong`, atau `Kandidat ritase belum selesai` bila penutup belum ada.
 
-Batasan data kosong: jika nama truck Kirim maupun aktivitas sama-sama tidak ada, pembandingan `key()` keduanya dapat sama-sama `null`. Jangan menafsirkan ini sebagai identitas truck yang terverifikasi; kualitas kolom identitas tetap harus diperiksa.
+Identitas kosong di kedua sisi bukan kecocokan truck. Tanpa ID/nama yang cocok, penutup tidak diverifikasi.
 
 `excluded-events` bukan total semua aktivitas di luar jendela. Aktivitas yang ditolak hanya karena waktu di luar jendela dilewati tanpa menambah penghitung tersebut. `undated-events` menghitung waktu tidak valid setelah penyaringan awal truck.
 
 ## 8. Pemeriksaan pasangan fisik
 
-Pemeriksaan ini dijalankan dalam jendela valid dan membutuhkan **Kosong Terima penutup**; Kosong Kirim dan jangkar Muat Kirim tidak wajib karena aktivitas Kirim dapat tidak tersedia. Muat Terima tetap wajib berada tidak lebih awal dari `dtLoaded` Kirim. Jika aktivitas Kirim hilang, halaman tetap menampilkan `missing-{indeks}` terkait.
+Pemeriksaan ini dijalankan dalam jendela valid dan membutuhkan **pembacaan Kosong Terima**, tidak harus penutup terverifikasi. Bukti fisik tidak otomatis mengesahkan penutup atau mengubah referensi; Kosong Kirim dan jangkar Muat Kirim tidak wajib karena aktivitas Kirim dapat tidak tersedia. Muat Terima tetap wajib berada tidak lebih awal dari `dtLoaded` Kirim. Jika aktivitas Kirim hilang, halaman tetap menampilkan `missing-{indeks}` terkait.
 
 Kandidat Terima fisik harus memenuhi semuanya:
 
 - Truck cocok menurut `truckMatches()`.
 - `dtDeletedAt` tidak bernilai truthy.
 - `Terima.dtLoaded` cocok dengan waktu salah satu kandidat Muat Terima: sama persis, atau pada detik yang sama jika nilai final berpresisi `.000` (milidetik nol).
-- `Terima.dtEmpty` cocok dengan waktu Kosong Terima penutup dengan aturan presisi yang sama.
+- `Terima.dtEmpty` cocok dengan salah satu pembacaan Kosong Terima dalam kandidat dengan aturan presisi yang sama. Toleransi ini hanya untuk temuan kandidat fisik, bukan verifikasi penutup.
 
 Final dengan milidetik bukan nol tetap harus sama persis sampai milidetik; pencocokan detik hanya untuk `.000`. Lebih dari satu kandidat cocok menghasilkan `ambiguous-physical-pair`.
 
@@ -182,7 +184,7 @@ Jika tepat satu kandidat fisik cocok, CDN sama, referensi Kirim kosong, Kirim ti
 
 Di luar kondisi tersebut, jika tepat satu kandidat cocok tetapi berbeda dari pasangan tersimpan, atau CDN-nya berbeda, muncul `physical-pair-mismatch`. Kirim lain yang menunjuk Terima tersebut mendapat `dumping-belongs-other-trip`. Jika lebih dari satu kandidat cocok, muncul `ambiguous-physical-pair`; tidak ada pemilihan otomatis.
 
-Jika pasangan tersimpan memiliki waktu kosong berbeda dari penutup ritase, muncul `linked-dumping-close-mismatch`.
+Jika dtEmpty pasangan tersimpan mencapai atau melewati batas ritase berikutnya, muncul `linked-dumping-close-mismatch` dan penutup tidak diverifikasi.
 
 Jika penutup terlihat tetapi pasangan tersimpan dan kandidat fisik tidak ditemukan, analisa membedakan Terima dengan CDN/truck sama yang belum terhubung dari Terima yang belum terlihat sama sekali. Keduanya memerlukan pemeriksaan DB, bukan perbaikan otomatis.
 
@@ -198,9 +200,20 @@ Terima #20: dtLoaded 12:00; dtEmpty 12:30
 
 Jika awal/jangkar/penutup ritase B terverifikasi pada snapshot, waktu fisik menunjuk Terima #20 sebagai kandidat untuk B. B mendapat `physical-pair-mismatch`; A mendapat `dumping-belongs-other-trip`. `pairs[B].dumping` tetap kosong karena referensi tersimpan B kosong. Contoh ini menunjukkan dugaan salah taut, bukan bukti penyebabnya.
 
+### Get LoadingLocation
+
+- Pasangan Terima mengikuti `Kirim.CTFinalDumpingTonnageID`, bukan kesamaan SK. Referensi NULL berarti hanya Kirim diperbarui. Referensi terisi wajib menunjuk tepat satu Terima aktif dengan EquipmentID sama dan tidak dibagi Kirim aktif lain. Pasangan tidak valid membatalkan seluruh aksi.
+- Lima kolom lokasi/kualitas yang sama ikut diperbarui pada Terima, meski nilai lama sudah terisi. Preview menunjukkan kedua baris; token mencakup snapshot pasangan. Kirim, Terima, dan audit disimpan dalam satu transaksi. Verifikasi penuh kedua baris memastikan waktu, tonase, SK, truck, dan relasi tidak berubah; kegagalan update/trigger/audit membatalkan semuanya. Struktur kolom Terima wajib diverifikasi DBA (tidak menebak alias).
+
+- Aksi tersedia di menu **Aksi** kartu Kirim aktif dengan `strStockPileName === null`; `undefined` atau string kosong tidak dianggap NULL. Tidak ada permission khusus: endpoint memakai login dan `transactions.view`. `LoadingLocationID` boleh sudah terisi; kelima kolom diganti bersama setelah konfirmasi.
+- Sumber truck/rentang diambil berdasarkan `CTFinalLoadingTonnageID` dari DB, bukan nilai kiriman browser. Reader terpilih adalah terbaru menurut `nr.dtcreatedAt DESC`, dengan EquipmentID sama dan waktu antara `dtEmpty`–`dtLoaded` inklusif. `TOP (1) WITH TIES` mendeteksi waktu terbaru ambigu dan menolak penyimpanan.
+- JOIN mengikuti `nr.RFIDReaderID = rr.RFIDReaderID`, `rr.LocationID = l.LocationID`, `cc.CoalQualityID = rr.CoalQualityID` dengan `cc` dari `tabCoalQualityAGM`. Lima nilai disimpan bersama: `l.LocationID → LoadingLocationID`, `l.strLocationName → strStockPileName`, `rr.CoalQualityID → CoalQualityID`, `cc.Coalcalory → CoalCalory`, `cc.CoalQualityName → strCoalQualityName`. Tidak menambahkan filter penghapusan AGM di luar query operator. Hasil JOIN ganda pada waktu terbaru ditolak sebagai ambigu.
+- Kandidat terbaru tidak lengkap ditolak, tanpa mencoba reader sebelumnya. Preview memperlihatkan lima nilai lama/baru dan waktu reader. Konfirmasi membawa token SHA256 snapshot, bukan nilai update dari browser. Transaksi SERIALIZABLE membaca ulang sumber/kandidat, menolak perubahan sejak preview, memperbarui tepat satu Kirim aktif yang `strStockPileName` masih NULL, lalu memverifikasi hasil.
+- Snapshot audit `loading_location.update` disimpan dalam transaksi DB yang sama; kegagalan audit membatalkan perubahan. Kolom Kirim di luar lima target wajib tetap sama setelah UPDATE. Efek trigger pada tabel lain belum diverifikasi; DBA wajib memeriksa sebelum aktivasi (lihat README). Tidak memperbarui relasi atau procedure melalui fitur ini.
+
 ### Penanda dispatcher
 
-Kirim/Terima final dengan `dtTimeCollected` valid dan milidetik eksplisit `.000` atau `,000` mendapat penanda **created by dispatcher**. Mendukung format SQL/ISO dan offset waktu. Waktu kosong, invalid, tanpa pecahan detik, atau milidetik bukan 000 tidak ditandai. TerimaRaw dan aktivitas reader tidak ditandai. Ini aturan tampilan berdasarkan presisi waktu sesuai permintaan operator, bukan bukti audit identitas pembuat; nilai sumber tidak diubah.
+Kirim/Terima final mendapat penanda **created by dispatcher** hanya jika ketiga kolom `dtTimeCollected`, `dtEmpty`, dan `dtLoaded` valid dan masing-masing memiliki milidetik eksplisit `.000` atau `,000` (syarat AND, bukan OR). Mendukung format SQL/ISO dan offset waktu. Waktu kosong, invalid, tanpa pecahan detik, atau milidetik bukan 000 tidak ditandai. TerimaRaw dan aktivitas reader tidak ditandai. Ini aturan tampilan berdasarkan presisi waktu sesuai permintaan operator, bukan bukti audit identitas pembuat; nilai sumber tidak diubah.
 
 ## 9. Kelengkapan, duplikasi, urutan
 
